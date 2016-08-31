@@ -695,8 +695,6 @@ def paramToDict(place, parameters=None):
 
 def getManualDirectories():
     directories = None
-    pagePath = directoryPath(conf.path)
-
     defaultDocRoot = DEFAULT_DOC_ROOTS.get(Backend.getOs(), DEFAULT_DOC_ROOTS[OS.LINUX])
 
     if kb.absFilePaths:
@@ -714,18 +712,18 @@ def getManualDirectories():
                 windowsDriveLetter, absFilePath = absFilePath[:2], absFilePath[2:]
                 absFilePath = ntToPosixSlashes(posixToNtSlashes(absFilePath))
 
-            if any("/%s/" % _ in absFilePath for _ in GENERIC_DOC_ROOT_DIRECTORY_NAMES):
-                for _ in GENERIC_DOC_ROOT_DIRECTORY_NAMES:
-                    _ = "/%s/" % _
+            for _ in list(GENERIC_DOC_ROOT_DIRECTORY_NAMES) + [conf.hostname]:
+                _ = "/%s/" % _
 
-                    if _ in absFilePath:
-                        directories = "%s%s" % (absFilePath.split(_)[0], _)
-                        break
+                if _ in absFilePath:
+                    directories = "%s%s" % (absFilePath.split(_)[0], _)
+                    break
 
-            if pagePath and pagePath in absFilePath:
-                directories = absFilePath.split(pagePath)[0]
-                if windowsDriveLetter:
-                    directories = "%s/%s" % (windowsDriveLetter, ntToPosixSlashes(directories))
+            if not directories and conf.path.strip('/') and conf.path in absFilePath:
+                directories = absFilePath.split(conf.path)[0]
+
+            if directories and windowsDriveLetter:
+                directories = "%s/%s" % (windowsDriveLetter, ntToPosixSlashes(directories))
 
     directories = normalizePath(directories)
 
@@ -1011,9 +1009,13 @@ def readInput(message, default=None, checkBatch=True):
                 retVal = raw_input() or default
                 retVal = getUnicode(retVal, encoding=sys.stdin.encoding) if retVal else retVal
             except:
-                time.sleep(0.05)  # Reference: http://www.gossamer-threads.com/lists/python/python/781893
-                kb.prependFlag = True
-                raise SqlmapUserQuitException
+                try:
+                    time.sleep(0.05)  # Reference: http://www.gossamer-threads.com/lists/python/python/781893
+                except:
+                    pass
+                finally:
+                    kb.prependFlag = True
+                    raise SqlmapUserQuitException
 
             finally:
                 logging._releaseLock()
@@ -1178,10 +1180,12 @@ def cleanQuery(query):
 
     return retVal
 
-def setPaths():
+def setPaths(rootPath):
     """
     Sets absolute paths for project directories and files
     """
+
+    paths.SQLMAP_ROOT_PATH = rootPath
 
     # sqlmap paths
     paths.SQLMAP_EXTRAS_PATH = os.path.join(paths.SQLMAP_ROOT_PATH, "extra")
@@ -1196,7 +1200,7 @@ def setPaths():
     paths.SQLMAP_XML_PAYLOADS_PATH = os.path.join(paths.SQLMAP_XML_PATH, "payloads")
 
     _ = os.path.join(os.path.expandvars(os.path.expanduser("~")), ".sqlmap")
-    paths.SQLMAP_OUTPUT_PATH = getUnicode(paths.get("SQLMAP_OUTPUT_PATH", os.path.join(_, "output")), encoding=sys.getfilesystemencoding())
+    paths.SQLMAP_OUTPUT_PATH = getUnicode(paths.get("SQLMAP_OUTPUT_PATH", os.path.join(_, "output")), encoding=sys.getfilesystemencoding() or UNICODE_ENCODING)
     paths.SQLMAP_DUMP_PATH = os.path.join(paths.SQLMAP_OUTPUT_PATH, "%s", "dump")
     paths.SQLMAP_FILES_PATH = os.path.join(paths.SQLMAP_OUTPUT_PATH, "%s", "files")
 
@@ -1205,6 +1209,7 @@ def setPaths():
     paths.SQL_SHELL_HISTORY = os.path.join(_, "sql.hst")
     paths.SQLMAP_SHELL_HISTORY = os.path.join(_, "sqlmap.hst")
     paths.GITHUB_HISTORY = os.path.join(_, "github.hst")
+    paths.CHECKSUM_MD5 = os.path.join(paths.SQLMAP_TXT_PATH, "checksum.md5")
     paths.COMMON_COLUMNS = os.path.join(paths.SQLMAP_TXT_PATH, "common-columns.txt")
     paths.COMMON_TABLES = os.path.join(paths.SQLMAP_TXT_PATH, "common-tables.txt")
     paths.COMMON_OUTPUTS = os.path.join(paths.SQLMAP_TXT_PATH, 'common-outputs.txt')
@@ -3073,6 +3078,24 @@ def decodeIntToUnicode(value):
         except:
             retVal = INFERENCE_UNKNOWN_CHAR
 
+    return retVal
+
+def checkIntegrity():
+    """
+    Checks integrity of code files during the unhandled exceptions
+    """
+
+    logger.debug("running code integrity check")
+
+    retVal = True
+    for checksum, _ in (re.split(r'\s+', _) for _ in getFileItems(paths.CHECKSUM_MD5)):
+        path = os.path.normpath(os.path.join(paths.SQLMAP_ROOT_PATH, _))
+        if not os.path.isfile(path):
+            logger.error("missing file detected '%s'" % path)
+            retVal = False
+        elif hashlib.md5(open(path, 'rb').read()).hexdigest() != checksum:
+            logger.error("wrong checksum of file '%s' detected" % path)
+            retVal = False
     return retVal
 
 def unhandledExceptionMessage():

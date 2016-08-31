@@ -72,6 +72,7 @@ from lib.core.settings import HEURISTIC_CHECK_ALPHABET
 from lib.core.settings import IDS_WAF_CHECK_PAYLOAD
 from lib.core.settings import IDS_WAF_CHECK_RATIO
 from lib.core.settings import IDS_WAF_CHECK_TIMEOUT
+from lib.core.settings import MAX_DIFFLIB_SEQUENCE_LENGTH
 from lib.core.settings import NON_SQLI_CHECK_PREFIX_SUFFIX_LENGTH
 from lib.core.settings import SUHOSIN_MAX_VALUE_LENGTH
 from lib.core.settings import SUPPORTED_DBMS
@@ -475,34 +476,21 @@ def checkSqlInjection(place, parameter, value):
 
                                     injectable = True
 
-                            if injectable and kb.pageStable and not any((conf.string, conf.notString, conf.regexp, conf.code, kb.nullConnection)):
-                                if all((falseCode, trueCode)) and falseCode != trueCode:
-                                    conf.code = trueCode
+                            if injectable:
+                                if kb.pageStable and not any((conf.string, conf.notString, conf.regexp, conf.code, kb.nullConnection)):
+                                    if all((falseCode, trueCode)) and falseCode != trueCode:
+                                        conf.code = trueCode
 
-                                    infoMsg = "%s parameter '%s' appears to be '%s' injectable (with --code=%d)" % (paramType, parameter, title, conf.code)
-                                    logger.info(infoMsg)
-                                else:
-                                    trueSet = set(extractTextTagContent(trueRawResponse))
-                                    trueSet = trueSet.union(__ for _ in trueSet for __ in _.split())
-
-                                    falseSet = set(extractTextTagContent(falseRawResponse))
-                                    falseSet = falseSet.union(__ for _ in falseSet for __ in _.split())
-
-                                    candidates = filter(None, (_.strip() if _.strip() in trueRawResponse and _.strip() not in falseRawResponse else None for _ in (trueSet - falseSet)))
-
-                                    if candidates:
-                                        candidates = sorted(candidates, key=lambda _: len(_))
-                                        for candidate in candidates:
-                                            if re.match(r"\A\w+\Z", candidate):
-                                                break
-
-                                        conf.string = candidate
-
-                                        infoMsg = "%s parameter '%s' appears to be '%s' injectable (with --string=\"%s\")" % (paramType, parameter, title, repr(conf.string).lstrip('u').strip("'"))
+                                        infoMsg = "%s parameter '%s' appears to be '%s' injectable (with --code=%d)" % (paramType, parameter, title, conf.code)
                                         logger.info(infoMsg)
+                                    else:
+                                        trueSet = set(extractTextTagContent(trueRawResponse))
+                                        trueSet = trueSet.union(__ for _ in trueSet for __ in _.split())
 
-                                    if not any((conf.string, conf.notString)):
-                                        candidates = filter(None, (_.strip() if _.strip() in falseRawResponse and _.strip() not in trueRawResponse else None for _ in (falseSet - trueSet)))
+                                        falseSet = set(extractTextTagContent(falseRawResponse))
+                                        falseSet = falseSet.union(__ for _ in falseSet for __ in _.split())
+
+                                        candidates = filter(None, (_.strip() if _.strip() in trueRawResponse and _.strip() not in falseRawResponse else None for _ in (trueSet - falseSet)))
 
                                         if candidates:
                                             candidates = sorted(candidates, key=lambda _: len(_))
@@ -510,10 +498,24 @@ def checkSqlInjection(place, parameter, value):
                                                 if re.match(r"\A\w+\Z", candidate):
                                                     break
 
-                                            conf.notString = candidate
+                                            conf.string = candidate
 
-                                            infoMsg = "%s parameter '%s' appears to be '%s' injectable (with --not-string=\"%s\")" % (paramType, parameter, title, repr(conf.notString).lstrip('u').strip("'"))
+                                            infoMsg = "%s parameter '%s' appears to be '%s' injectable (with --string=\"%s\")" % (paramType, parameter, title, repr(conf.string).lstrip('u').strip("'"))
                                             logger.info(infoMsg)
+
+                                        if not any((conf.string, conf.notString)):
+                                            candidates = filter(None, (_.strip() if _.strip() in falseRawResponse and _.strip() not in trueRawResponse else None for _ in (falseSet - trueSet)))
+
+                                            if candidates:
+                                                candidates = sorted(candidates, key=lambda _: len(_))
+                                                for candidate in candidates:
+                                                    if re.match(r"\A\w+\Z", candidate):
+                                                        break
+
+                                                conf.notString = candidate
+
+                                                infoMsg = "%s parameter '%s' appears to be '%s' injectable (with --not-string=\"%s\")" % (paramType, parameter, title, repr(conf.notString).lstrip('u').strip("'"))
+                                                logger.info(infoMsg)
 
                                 if not any((conf.string, conf.notString, conf.code)):
                                     infoMsg = "%s parameter '%s' appears to be '%s' injectable " % (paramType, parameter, title)
@@ -1057,12 +1059,22 @@ def checkDynamicContent(firstPage, secondPage):
         logger.critical(warnMsg)
         return
 
-    seqMatcher = getCurrentThreadData().seqMatcher
-    seqMatcher.set_seq1(firstPage)
-    seqMatcher.set_seq2(secondPage)
+    if firstPage and secondPage and any(len(_) > MAX_DIFFLIB_SEQUENCE_LENGTH for _ in (firstPage, secondPage)):
+        ratio = None
+    else:
+        try:
+            seqMatcher = getCurrentThreadData().seqMatcher
+            seqMatcher.set_seq1(firstPage)
+            seqMatcher.set_seq2(secondPage)
+            ratio = seqMatcher.quick_ratio()
+        except MemoryError:
+            ratio = None
+
+    if ratio is None:
+        kb.skipSeqMatcher = True
 
     # In case of an intolerable difference turn on dynamicity removal engine
-    if seqMatcher.quick_ratio() <= UPPER_RATIO_BOUND:
+    elif ratio <= UPPER_RATIO_BOUND:
         findDynamicContent(firstPage, secondPage)
 
         count = 0

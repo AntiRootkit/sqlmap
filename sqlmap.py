@@ -34,6 +34,7 @@ from lib.core.data import logger
 try:
     from lib.controller.controller import start
     from lib.core.common import banner
+    from lib.core.common import checkIntegrity
     from lib.core.common import createGithubIssue
     from lib.core.common import dataToStdout
     from lib.core.common import getSafeExString
@@ -44,7 +45,6 @@ try:
     from lib.core.data import cmdLineOptions
     from lib.core.data import conf
     from lib.core.data import kb
-    from lib.core.data import paths
     from lib.core.common import unhandledExceptionMessage
     from lib.core.common import MKSTEMP_PREFIX
     from lib.core.exception import SqlmapBaseException
@@ -54,9 +54,11 @@ try:
     from lib.core.option import initOptions
     from lib.core.option import init
     from lib.core.profiling import profile
+    from lib.core.settings import GIT_PAGE
     from lib.core.settings import IS_WIN
     from lib.core.settings import LEGAL_DISCLAIMER
     from lib.core.settings import THREAD_FINALIZATION_TIMEOUT
+    from lib.core.settings import UNICODE_ENCODING
     from lib.core.settings import VERSION
     from lib.core.testing import smokeTest
     from lib.core.testing import liveTest
@@ -80,13 +82,11 @@ def modulePath():
     except NameError:
         _ = inspect.getsourcefile(modulePath)
 
-    return getUnicode(os.path.dirname(os.path.realpath(_)), encoding=sys.getfilesystemencoding())
+    return getUnicode(os.path.dirname(os.path.realpath(_)), encoding=sys.getfilesystemencoding() or UNICODE_ENCODING)
 
 def checkEnvironment():
-    paths.SQLMAP_ROOT_PATH = modulePath()
-
     try:
-        os.path.isdir(paths.SQLMAP_ROOT_PATH)
+        os.path.isdir(modulePath())
     except UnicodeEncodeError:
         errMsg = "your system does not properly handle non-ASCII paths. "
         errMsg += "Please move the sqlmap's directory to the other location"
@@ -109,7 +109,7 @@ def main():
     try:
         checkEnvironment()
 
-        setPaths()
+        setPaths(modulePath())
         banner()
 
         # Store original command line options for possible later restoration
@@ -194,13 +194,34 @@ def main():
         excMsg = traceback.format_exc()
 
         try:
-            if any(_ in excMsg for _ in ("No space left", "Disk quota exceeded")):
+            if not checkIntegrity():
+                errMsg = "code integrity check failed. "
+                errMsg += "You should retrieve the latest development version from official GitHub "
+                errMsg += "repository at '%s'" % GIT_PAGE
+                logger.critical(errMsg)
+                print
+                dataToStdout(excMsg)
+                raise SystemExit
+
+            elif any(_ in excMsg for _ in ("No space left", "Disk quota exceeded")):
                 errMsg = "no space left on output device"
+                logger.error(errMsg)
+                raise SystemExit
+
+            elif all(_ in excMsg for _ in ("No such file", "_'", "self.get_prog_name()")):
+                errMsg = "corrupted installation detected ('%s'). " % excMsg.strip().split('\n')[-1]
+                errMsg += "You should retrieve the latest development version from official GitHub "
+                errMsg += "repository at '%s'" % GIT_PAGE
                 logger.error(errMsg)
                 raise SystemExit
 
             elif "Read-only file system" in excMsg:
                 errMsg = "output device is mounted as read-only"
+                logger.error(errMsg)
+                raise SystemExit
+
+            elif "OperationalError: disk I/O error" in excMsg:
+                errMsg = "I/O error on output device"
                 logger.error(errMsg)
                 raise SystemExit
 
@@ -255,20 +276,21 @@ def main():
 
     finally:
         kb.threadContinue = False
-        kb.threadException = True
 
         if conf.get("showTime"):
             dataToStdout("\n[*] shutting down at %s\n\n" % time.strftime("%X"), forceOutput=True)
 
+        kb.threadException = True
+
         if kb.get("tempDir"):
-                for prefix in (MKSTEMP_PREFIX.IPC, MKSTEMP_PREFIX.TESTING, MKSTEMP_PREFIX.COOKIE_JAR, MKSTEMP_PREFIX.BIG_ARRAY):
-                    for filepath in glob.glob(os.path.join(kb.tempDir, "%s*" % prefix)):
-                        try:
-                            os.remove(filepath)
-                        except OSError:
-                            pass
-                if not filter(None, (filepath for filepath in glob.glob(os.path.join(kb.tempDir, '*')) if not any(filepath.endswith(_) for _ in ('.lock', '.exe', '_')))):
-                    shutil.rmtree(kb.tempDir, ignore_errors=True)
+            for prefix in (MKSTEMP_PREFIX.IPC, MKSTEMP_PREFIX.TESTING, MKSTEMP_PREFIX.COOKIE_JAR, MKSTEMP_PREFIX.BIG_ARRAY):
+                for filepath in glob.glob(os.path.join(kb.tempDir, "%s*" % prefix)):
+                    try:
+                        os.remove(filepath)
+                    except OSError:
+                        pass
+            if not filter(None, (filepath for filepath in glob.glob(os.path.join(kb.tempDir, '*')) if not any(filepath.endswith(_) for _ in ('.lock', '.exe', '_')))):
+                shutil.rmtree(kb.tempDir, ignore_errors=True)
 
         if conf.get("hashDB"):
             try:
@@ -284,7 +306,7 @@ def main():
 
         if hasattr(conf, "api"):
             try:
-                conf.database_cursor.disconnect()
+                conf.databaseCursor.disconnect()
             except KeyboardInterrupt:
                 pass
 
@@ -298,10 +320,10 @@ def main():
                 time.sleep(0.01)
         except KeyboardInterrupt:
             pass
-
-        # Reference: http://stackoverflow.com/questions/1635080/terminate-a-multi-thread-python-program
-        if threading.activeCount() > 1:
-            os._exit(0)
+        finally:
+            # Reference: http://stackoverflow.com/questions/1635080/terminate-a-multi-thread-python-program
+            if threading.activeCount() > 1:
+                os._exit(0)
 
 if __name__ == "__main__":
     main()

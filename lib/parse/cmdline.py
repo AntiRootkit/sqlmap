@@ -31,6 +31,7 @@ from lib.core.settings import BASIC_HELP_ITEMS
 from lib.core.settings import DUMMY_URL
 from lib.core.settings import IS_WIN
 from lib.core.settings import MAX_HELP_OPTION_LENGTH
+from lib.core.settings import UNICODE_ENCODING
 from lib.core.settings import VERSION_STRING
 from lib.core.shell import autoCompletion
 from lib.core.shell import clearHistory
@@ -47,7 +48,7 @@ def cmdLineParser(argv=None):
 
     checkSystemEncoding()
 
-    _ = getUnicode(os.path.basename(argv[0]), encoding=sys.getfilesystemencoding())
+    _ = getUnicode(os.path.basename(argv[0]), encoding=sys.getfilesystemencoding() or UNICODE_ENCODING)
 
     usage = "%s%s [options]" % ("python " if not IS_WIN else "", \
             "\"%s\"" % _ if " " in _ else _)
@@ -172,7 +173,7 @@ def cmdLineParser(argv=None):
                                   help="Set Tor proxy port other than default")
 
         request.add_option("--tor-type", dest="torType",
-                                  help="Set Tor proxy type (HTTP (default), SOCKS4 or SOCKS5)")
+                                  help="Set Tor proxy type (HTTP, SOCKS4 or SOCKS5 (default))")
 
         request.add_option("--check-tor", dest="checkTor",
                                   action="store_true",
@@ -825,7 +826,7 @@ def cmdLineParser(argv=None):
         extraHeaders = []
 
         for arg in argv:
-            _.append(getUnicode(arg, encoding=sys.getfilesystemencoding()))
+            _.append(getUnicode(arg, encoding=sys.getfilesystemencoding() or UNICODE_ENCODING))
 
         argv = _
         checkDeprecatedOptions(argv)
@@ -937,7 +938,7 @@ def cmdLineParser(argv=None):
             args.requestFile, args.updateAll, args.smokeTest, args.liveTest, args.wizard, args.dependencies, \
             args.purgeOutput, args.pickledOptions, args.sitemapUrl)):
             errMsg = "missing a mandatory option (-d, -u, -l, -m, -r, -g, -c, -x, --wizard, --update, --purge-output or --dependencies), "
-            errMsg += "use -h for basic or -hh for advanced help"
+            errMsg += "use -h for basic or -hh for advanced help\n"
             parser.error(errMsg)
 
         return args

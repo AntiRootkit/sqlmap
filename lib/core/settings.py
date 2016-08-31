@@ -19,10 +19,11 @@ from lib.core.enums import OS
 from lib.core.revision import getRevisionNumber
 
 # sqlmap version (<major>.<minor>.<month>.<monthly commit>)
-VERSION = "1.0.6.39"
+VERSION = "1.0.8.24"
 REVISION = getRevisionNumber()
-STABLE = VERSION.count('.') <= 2
-VERSION_STRING = "sqlmap/%s#%s" % (VERSION, "stable" if STABLE else "dev")
+TYPE = "dev" if VERSION.count('.') > 2 and VERSION.split('.')[-1] != '0' else "stable"
+TYPE_COLORS = {"dev": 33, "stable": 90, "pip": 34}
+VERSION_STRING = "sqlmap/%s#%s" % ('.'.join(VERSION.split('.')[::-1]) if VERSION.count('.') > 2 and VERSION.split('.')[-1] == '0' else VERSION, TYPE)
 DESCRIPTION = "automatic SQL injection and database takeover tool"
 SITE = "http://sqlmap.org"
 ISSUES_PAGE = "https://github.com/sqlmapproject/sqlmap/issues/new"
@@ -35,7 +36,7 @@ BANNER = """\033[01;33m         _
 |_ -| . | |     | .'| . |
 |___|_  |_|_|_|_|__,|  _|
       |_|           |_|   \033[0m\033[4;37m%s\033[0m\n
-""" % ((31 + hash(VERSION) % 6) if not STABLE else 30, VERSION_STRING.split('/')[-1], SITE)
+""" % (TYPE_COLORS.get(TYPE, 31), VERSION_STRING.split('/')[-1], SITE)
 
 # Minimum distance of ratio from kb.matchRatio to result in True
 DIFF_TOLERANCE = 0.05
@@ -80,6 +81,9 @@ PERMISSION_DENIED_REGEX = r"(command|permission|access)\s*(was|is)?\s*denied"
 
 # Regular expression used for recognition of generic maximum connection messages
 MAX_CONNECTIONS_REGEX = r"max.+connections"
+
+# Timeout before the pre-connection candidate is being disposed (because of high probability that the web server will reset it)
+PRECONNECT_CANDIDATE_TIMEOUT = 10
 
 # Regular expression used for extracting results from Google search
 GOOGLE_REGEX = r"webcache\.googleusercontent\.com/search\?q=cache:[^:]+:([^+]+)\+&amp;cd=|url\?\w+=((?![^>]+webcache\.googleusercontent\.com)http[^>]+)&(sa=U|rct=j)"
@@ -288,7 +292,7 @@ BLANK = "<blank>"
 CURRENT_DB = "CD"
 
 # Regular expressions used for finding file paths in error messages
-FILE_PATH_REGEXES = (r" in (file )?<b>(?P<result>.*?)</b> on line", r"(?:[>(\[\s])(?P<result>[A-Za-z]:[\\/][\w.\\/-]*)", r"(?:[>(\[\s])(?P<result>/\w[/\w.-]+)", r"href=['\"]file://(?P<result>/[^'\"]+)")
+FILE_PATH_REGEXES = (r" in (file )?<b>(?P<result>.*?)</b> on line \d+", r"in (?P<result>[^<>]+?) on line \d+", r"(?:[>(\[\s])(?P<result>[A-Za-z]:[\\/][\w. \\/-]*)", r"(?:[>(\[\s])(?P<result>/\w[/\w.-]+)", r"href=['\"]file://(?P<result>/[^'\"]+)")
 
 # Regular expressions used for parsing error messages (--parse-errors)
 ERROR_PARSING_REGEXES = (
@@ -540,7 +544,7 @@ HASHDB_FLUSH_RETRIES = 3
 HASHDB_END_TRANSACTION_RETRIES = 3
 
 # Unique milestone value used for forced deprecation of old HashDB values (e.g. when changing hash/pickle mechanism)
-HASHDB_MILESTONE_VALUE = "pGBhWXgbtJ"  # import random, string; print "".join(random.sample(string.ascii_letters, 10))
+HASHDB_MILESTONE_VALUE = "baFJusZrel"  # python -c 'import random, string; print "".join(random.sample(string.ascii_letters, 10))'
 
 # Warn user of possible delay due to large page dump in full UNION query injections
 LARGE_OUTPUT_THRESHOLD = 1024 ** 2
@@ -581,6 +585,9 @@ MAX_CONNECTION_CHUNK_SIZE = 10 * 1024 * 1024
 # Maximum response total page size (trimmed if larger)
 MAX_CONNECTION_TOTAL_SIZE = 100 * 1024 * 1024
 
+# For preventing MemoryError exceptions (caused when using large sequences in difflib.SequenceMatcher)
+MAX_DIFFLIB_SEQUENCE_LENGTH = 10 * 1024 * 1024
+
 # Maximum (multi-threaded) length of entry in bisection algorithm
 MAX_BISECTION_LENGTH = 50 * 1024 * 1024
 
@@ -597,7 +604,7 @@ VALID_TIME_CHARS_RUN_THRESHOLD = 100
 CHECK_ZERO_COLUMNS_THRESHOLD = 10
 
 # Boldify all logger messages containing these "patterns"
-BOLD_PATTERNS = ("' injectable", "provided empty", "leftover chars", "might be injectable", "' is vulnerable", "is not injectable", "test failed", "test passed", "live test final result", "test shows that", "the back-end DBMS is", "created Github", "blocked by the target server", "protection is involved")
+BOLD_PATTERNS = ("' injectable", "provided empty", "leftover chars", "might be injectable", "' is vulnerable", "is not injectable", "test failed", "test passed", "live test final result", "test shows that", "the back-end DBMS is", "created Github", "blocked by the target server", "protection is involved", "CAPTCHA")
 
 # Generic www root directory names
 GENERIC_DOC_ROOT_DIRECTORY_NAMES = ("htdocs", "httpdocs", "public", "wwwroot", "www")
@@ -609,7 +616,7 @@ MAX_HELP_OPTION_LENGTH = 18
 MAX_CONNECT_RETRIES = 100
 
 # Strings for detecting formatting errors
-FORMAT_EXCEPTION_STRINGS = ("Type mismatch", "Error converting", "Conversion failed", "String or binary data would be truncated", "Failed to convert", "unable to interpret text value", "System.FormatException", "java.lang.NumberFormatException", "ValueError: invalid literal", "DataTypeMismatchException")
+FORMAT_EXCEPTION_STRINGS = ("Type mismatch", "Error converting", "Conversion failed", "String or binary data would be truncated", "Failed to convert", "unable to interpret text value", "Input string was not in a correct format", "System.FormatException", "java.lang.NumberFormatException", "ValueError: invalid literal", "DataTypeMismatchException", "CF_SQL_INTEGER", " for CFSQLTYPE ", "cfqueryparam cfsqltype", "InvalidParamTypeException", "Invalid parameter type", "is not of type numeric", "<cfif Not IsNumeric(", "invalid input syntax for integer", "invalid input syntax for type", "invalid number", "character to number conversion error", "unable to interpret text value", "String was not recognized as a valid", "Convert.ToInt", "cannot be converted to a ", "InvalidDataException")
 
 # Regular expression used for extracting ASP.NET view state values
 VIEWSTATE_REGEX = r'(?i)(?P<name>__VIEWSTATE[^"]*)[^>]+value="(?P<result>[^"]+)'
@@ -658,6 +665,9 @@ SUHOSIN_MAX_VALUE_LENGTH = 512
 
 # Minimum size of an (binary) entry before it can be considered for dumping to disk
 MIN_BINARY_DISK_DUMP_SIZE = 100
+
+# Filenames of payloads xml files (in order of loading)
+PAYLOAD_XML_FILES = ("boolean_blind.xml", "error_based.xml", "inline_query.xml", "stacked_queries.xml", "time_blind.xml", "union_query.xml")
 
 # Regular expression used for extracting form tags
 FORM_SEARCH_REGEX = r"(?si)<form(?!.+<form).+?</form>"

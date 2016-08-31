@@ -119,8 +119,14 @@ class Dump(object):
         elif data is not None:
             _ = getUnicode(data)
 
-            if _ and _[-1] == '\n':
+            if _.endswith("\r\n"):
+                _ = _[:-2]
+
+            elif _.endswith("\n"):
                 _ = _[:-1]
+
+            if _.strip(' '):
+                _ = _.strip(' ')
 
             if "\n" in _:
                 self._write("%s:\n---\n%s\n---" % (header, _))
@@ -458,8 +464,12 @@ class Dump(object):
                     while True:
                         candidate = "%s.%d" % (dumpFileName, count)
                         if not checkFile(candidate, False):
-                            shutil.copyfile(dumpFileName, candidate)
-                            break
+                            try:
+                                shutil.copyfile(dumpFileName, candidate)
+                            except IOError:
+                                pass
+                            finally:
+                                break
                         else:
                             count += 1
 
