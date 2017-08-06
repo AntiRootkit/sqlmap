@@ -9,12 +9,16 @@ import sys
 
 sys.dont_write_bytecode = True
 
-__import__("lib.utils.versioncheck")  # this has to be the first non-standard import
+try:
+    __import__("lib.utils.versioncheck")  # this has to be the first non-standard import
+except ImportError:
+    exit("[!] wrong installation detected (missing modules). Visit 'https://github.com/sqlmapproject/sqlmap/#installation' for further details")
 
 import bdb
 import distutils
 import glob
 import inspect
+import json
 import logging
 import os
 import re
@@ -40,6 +44,7 @@ try:
     from lib.core.common import getSafeExString
     from lib.core.common import getUnicode
     from lib.core.common import maskSensitiveData
+    from lib.core.common import openFile
     from lib.core.common import setPaths
     from lib.core.common import weAreFrozen
     from lib.core.data import cmdLineOptions
@@ -214,7 +219,7 @@ def main():
                 dataToStdout(excMsg)
                 raise SystemExit
 
-            elif "tamper/" in excMsg:
+            elif any(_ in excMsg for _ in ("tamper/", "waf/")):
                 logger.critical(errMsg)
                 print
                 dataToStdout(excMsg)
@@ -282,6 +287,9 @@ def main():
             elif "valueStack.pop" in excMsg and kb.get("dumpKeyboardInterrupt"):
                 raise SystemExit
 
+            elif any(_ in excMsg for _ in ("Broken pipe",)):
+                raise SystemExit
+
             for match in re.finditer(r'File "(.+?)", line', excMsg):
                 file_ = match.group(1)
                 file_ = os.path.relpath(file_, os.path.dirname(__file__))
@@ -326,6 +334,10 @@ def main():
                 conf.hashDB.flush(True)
             except KeyboardInterrupt:
                 pass
+
+        if conf.get("harFile"):
+            with openFile(conf.harFile, "w+b") as f:
+                json.dump(conf.httpCollector.obtain(), fp=f, indent=4, separators=(',', ': '))
 
         if cmdLineOptions.get("sqlmapShell"):
             cmdLineOptions.clear()
