@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2017 sqlmap developers (http://sqlmap.org/)
-See the file 'doc/COPYING' for copying permission
+Copyright (c) 2006-2018 sqlmap developers (http://sqlmap.org/)
+See the file 'LICENSE' for copying permission
 """
 
 import re
@@ -22,6 +22,7 @@ from lib.core.common import isTechniqueAvailable
 from lib.core.common import prioritySortColumns
 from lib.core.common import readInput
 from lib.core.common import safeSQLIdentificatorNaming
+from lib.core.common import singleTimeLogMessage
 from lib.core.common import unArrayizeValue
 from lib.core.common import unsafeSQLIdentificatorNaming
 from lib.core.data import conf
@@ -68,10 +69,15 @@ class Entries:
             if Backend.getIdentifiedDbms() in (DBMS.ORACLE, DBMS.DB2, DBMS.HSQLDB):
                 conf.db = conf.db.upper()
 
-            if  ',' in conf.db:
+            if ',' in conf.db:
                 errMsg = "only one database name is allowed when enumerating "
                 errMsg += "the tables' columns"
                 raise SqlmapMissingMandatoryOptionException(errMsg)
+
+            if conf.exclude and conf.db in conf.exclude.split(','):
+                infoMsg = "skipping database '%s'" % unsafeSQLIdentificatorNaming(conf.db)
+                singleTimeLogMessage(infoMsg)
+                return
 
         conf.db = safeSQLIdentificatorNaming(conf.db)
 
@@ -99,6 +105,14 @@ class Entries:
             tblList[tblList.index(tbl)] = safeSQLIdentificatorNaming(tbl, True)
 
         for tbl in tblList:
+            if kb.dumpKeyboardInterrupt:
+                break
+
+            if conf.exclude and tbl in conf.exclude.split(','):
+                infoMsg = "skipping table '%s'" % unsafeSQLIdentificatorNaming(tbl)
+                singleTimeLogMessage(infoMsg)
+                continue
+
             conf.tbl = tbl
             kb.data.dumpedTable = {}
 
@@ -129,8 +143,8 @@ class Entries:
                 columns = kb.data.cachedColumns[safeSQLIdentificatorNaming(conf.db)][safeSQLIdentificatorNaming(tbl, True)]
                 colList = sorted(filter(None, columns.keys()))
 
-                if conf.excludeCol:
-                    colList = [_ for _ in colList if _ not in conf.excludeCol.split(',')]
+                if conf.exclude:
+                    colList = [_ for _ in colList if _ not in conf.exclude.split(',')]
 
                 if not colList:
                     warnMsg = "skipping table '%s'" % unsafeSQLIdentificatorNaming(tbl)
@@ -303,13 +317,15 @@ class Entries:
 
                         continue
 
-                    elif Backend.getIdentifiedDbms() in (DBMS.ACCESS, DBMS.SYBASE, DBMS.MAXDB, DBMS.MSSQL):
+                    elif Backend.getIdentifiedDbms() in (DBMS.ACCESS, DBMS.SYBASE, DBMS.MAXDB, DBMS.MSSQL, DBMS.INFORMIX):
                         if Backend.isDbms(DBMS.ACCESS):
                             table = tbl
                         elif Backend.getIdentifiedDbms() in (DBMS.SYBASE, DBMS.MSSQL):
                             table = "%s.%s" % (conf.db, tbl)
                         elif Backend.isDbms(DBMS.MAXDB):
                             table = "%s.%s" % (conf.db, tbl)
+                        elif Backend.isDbms(DBMS.INFORMIX):
+                            table = "%s:%s" % (conf.db, tbl)
 
                         if Backend.isDbms(DBMS.MSSQL):
                             try:
@@ -457,12 +473,17 @@ class Entries:
 
         if kb.data.cachedTables:
             if isinstance(kb.data.cachedTables, list):
-                kb.data.cachedTables = { None: kb.data.cachedTables }
+                kb.data.cachedTables = {None: kb.data.cachedTables}
 
             for db, tables in kb.data.cachedTables.items():
                 conf.db = db
 
                 for table in tables:
+                    if conf.exclude and table in conf.exclude.split(','):
+                        infoMsg = "skipping table '%s'" % unsafeSQLIdentificatorNaming(table)
+                        logger.info(infoMsg)
+                        continue
+
                     try:
                         conf.tbl = table
                         kb.data.cachedColumns = {}
@@ -528,8 +549,8 @@ class Entries:
                 conf.tbl = table
                 colList = filter(None, sorted(columns))
 
-                if conf.excludeCol:
-                    colList = [_ for _ in colList if _ not in conf.excludeCol.split(',')]
+                if conf.exclude:
+                    colList = [_ for _ in colList if _ not in conf.exclude.split(',')]
 
                 conf.col = ','.join(colList)
                 kb.data.cachedColumns = {}

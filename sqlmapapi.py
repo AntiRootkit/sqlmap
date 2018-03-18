@@ -1,17 +1,22 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2017 sqlmap developers (http://sqlmap.org/)
-See the file 'doc/COPYING' for copying permission
+Copyright (c) 2006-2018 sqlmap developers (http://sqlmap.org/)
+See the file 'LICENSE' for copying permission
 """
 
-import logging
-import optparse
 import sys
 
 sys.dont_write_bytecode = True
 
 __import__("lib.utils.versioncheck")  # this has to be the first non-standard import
+
+import logging
+import optparse
+import warnings
+
+warnings.filterwarnings(action="ignore", message=".*was already imported", category=UserWarning)
+warnings.filterwarnings(action="ignore", category=DeprecationWarning)
 
 from sqlmap import modulePath
 from lib.core.common import setPaths

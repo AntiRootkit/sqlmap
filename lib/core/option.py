@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2017 sqlmap developers (http://sqlmap.org/)
-See the file 'doc/COPYING' for copying permission
+Copyright (c) 2006-2018 sqlmap developers (http://sqlmap.org/)
+See the file 'LICENSE' for copying permission
 """
 
 import binascii
@@ -337,7 +337,7 @@ def _feedTargetsDict(reqFile, addedTargetUrls):
 
                 if not host:
                     errMsg = "invalid format of a request file"
-                    raise SqlmapSyntaxException, errMsg
+                    raise SqlmapSyntaxException(errMsg)
 
                 if not url.startswith("http"):
                     url = "%s://%s:%s%s" % (scheme or "http", host, port or "80", url)
@@ -402,7 +402,7 @@ def _loadQueries():
         errMsg = "something appears to be wrong with "
         errMsg += "the file '%s' ('%s'). Please make " % (paths.QUERIES_XML, getSafeExString(ex))
         errMsg += "sure that you haven't made any changes to it"
-        raise SqlmapInstallationException, errMsg
+        raise SqlmapInstallationException(errMsg)
 
     for node in tree.findall("*"):
         queries[node.attrib['value']] = iterate(node)
@@ -434,7 +434,7 @@ def _setMultipleTargets():
         files.sort()
 
         for reqFile in files:
-            if not re.search("([\d]+)\-request", reqFile):
+            if not re.search(r"([\d]+)\-request", reqFile):
                 continue
 
             _feedTargetsDict(os.path.join(conf.logFile, reqFile), addedTargetUrls)
@@ -666,7 +666,7 @@ def _setDBMSAuthentication():
     debugMsg = "setting the DBMS authentication credentials"
     logger.debug(debugMsg)
 
-    match = re.search("^(.+?):(.*?)$", conf.dbmsCred)
+    match = re.search(r"^(.+?):(.*?)$", conf.dbmsCred)
 
     if not match:
         errMsg = "DBMS authentication credentials value must be in format "
@@ -687,12 +687,12 @@ def _setMetasploit():
 
     if IS_WIN:
         try:
-            import win32file
+            __import__("win32file")
         except ImportError:
             errMsg = "sqlmap requires third-party module 'pywin32' "
             errMsg += "in order to use Metasploit functionalities on "
             errMsg += "Windows. You can download it from "
-            errMsg += "'http://sourceforge.net/projects/pywin32/files/pywin32/'"
+            errMsg += "'https://sourceforge.net/projects/pywin32/files/pywin32/'"
             raise SqlmapMissingDependence(errMsg)
 
         if not conf.msfPath:
@@ -700,7 +700,7 @@ def _setMetasploit():
                 retVal = None
 
                 try:
-                    from  _winreg import ConnectRegistry, OpenKey, QueryValueEx, HKEY_LOCAL_MACHINE
+                    from _winreg import ConnectRegistry, OpenKey, QueryValueEx, HKEY_LOCAL_MACHINE
                     _ = ConnectRegistry(None, HKEY_LOCAL_MACHINE)
                     _ = OpenKey(_, key)
                     retVal = QueryValueEx(_, value)[0]
@@ -784,7 +784,7 @@ def _setMetasploit():
 
     if not msfEnvPathExists:
         errMsg = "unable to locate Metasploit Framework installation. "
-        errMsg += "You can get it at 'http://www.metasploit.com/download/'"
+        errMsg += "You can get it at 'https://www.metasploit.com/download/'"
         raise SqlmapFilePathException(errMsg)
 
 def _setWriteFile():
@@ -861,7 +861,7 @@ def _setDBMS():
     logger.debug(debugMsg)
 
     conf.dbms = conf.dbms.lower()
-    regex = re.search("%s ([\d\.]+)" % ("(%s)" % "|".join([alias for alias in SUPPORTED_DBMS])), conf.dbms, re.I)
+    regex = re.search(r"%s ([\d\.]+)" % ("(%s)" % "|".join([alias for alias in SUPPORTED_DBMS])), conf.dbms, re.I)
 
     if regex:
         conf.dbms = regex.group(1)
@@ -931,7 +931,7 @@ def _setTamperingFunctions():
 
             try:
                 module = __import__(filename[:-3].encode(sys.getfilesystemencoding() or UNICODE_ENCODING))
-            except (ImportError, SyntaxError), ex:
+            except Exception, ex:
                 raise SqlmapSyntaxException("cannot import tamper script '%s' (%s)" % (filename[:-3], getSafeExString(ex)))
 
             priority = PRIORITY.NORMAL if not hasattr(module, "__priority__") else module.__priority__
@@ -1046,7 +1046,7 @@ def _setSocketPreConnect():
     if conf.disablePrecon:
         return
 
-    def _():
+    def _thread():
         while kb.get("threadContinue") and not conf.get("disablePrecon"):
             try:
                 for key in socket._ready:
@@ -1078,6 +1078,7 @@ def _setSocketPreConnect():
                     break
                 else:
                     try:
+                        candidate.shutdown(socket.SHUT_RDWR)
                         candidate.close()
                     except socket.error:
                         pass
@@ -1090,7 +1091,7 @@ def _setSocketPreConnect():
         socket.socket._connect = socket.socket.connect
         socket.socket.connect = connect
 
-        thread = threading.Thread(target=_)
+        thread = threading.Thread(target=_thread)
         setDaemon(thread)
         thread.start()
 
@@ -1127,7 +1128,7 @@ def _setHTTPHandlers():
             _ = urlparse.urlsplit(conf.proxy)
         except Exception, ex:
             errMsg = "invalid proxy address '%s' ('%s')" % (conf.proxy, getSafeExString(ex))
-            raise SqlmapSyntaxException, errMsg
+            raise SqlmapSyntaxException(errMsg)
 
         hostnamePort = _.netloc.split(":")
 
@@ -1148,7 +1149,7 @@ def _setHTTPHandlers():
             raise SqlmapSyntaxException(errMsg)
 
         if conf.proxyCred:
-            _ = re.search("^(.*?):(.*?)$", conf.proxyCred)
+            _ = re.search(r"\A(.*?):(.*?)\Z", conf.proxyCred)
             if not _:
                 errMsg = "proxy authentication credentials "
                 errMsg += "value must be in format username:password"
@@ -1254,9 +1255,9 @@ def _setSafeVisit():
                 kb.safeReq.post = None
         else:
             errMsg = "invalid format of a safe request file"
-            raise SqlmapSyntaxException, errMsg
+            raise SqlmapSyntaxException(errMsg)
     else:
-        if not re.search("^http[s]*://", conf.safeUrl):
+        if not re.search(r"\Ahttp[s]*://", conf.safeUrl):
             if ":443/" in conf.safeUrl:
                 conf.safeUrl = "https://" + conf.safeUrl
             else:
@@ -1376,7 +1377,7 @@ def _setHTTPAuthentication():
             except ImportError:
                 errMsg = "sqlmap requires Python NTLM third-party library "
                 errMsg += "in order to authenticate via NTLM, "
-                errMsg += "http://code.google.com/p/python-ntlm/"
+                errMsg += "https://github.com/mullender/python-ntlm"
                 raise SqlmapMissingDependence(errMsg)
 
             authHandler = HTTPNtlmAuthHandler.HTTPNtlmAuthHandler(kb.passwordMgr)
@@ -1409,8 +1410,8 @@ def _setHTTPExtraHeaders():
                 raise SqlmapSyntaxException(errMsg)
 
     elif not conf.requestFile and len(conf.httpHeaders or []) < 2:
-        if conf.charset:
-            conf.httpHeaders.append((HTTP_HEADER.ACCEPT_CHARSET, "%s;q=0.7,*;q=0.1" % conf.charset))
+        if conf.encoding:
+            conf.httpHeaders.append((HTTP_HEADER.ACCEPT_CHARSET, "%s;q=0.7,*;q=0.1" % conf.encoding))
 
         # Invalidating any caching mechanism in between
         # Reference: http://stackoverflow.com/a/1383359
@@ -1488,8 +1489,8 @@ def _setHTTPUserAgent():
 
         userAgent = random.sample(kb.userAgents or [_defaultHTTPUserAgent()], 1)[0]
 
-        infoMsg = "fetched random HTTP User-Agent header from "
-        infoMsg += "file '%s': '%s'" % (paths.USER_AGENTS, userAgent)
+        infoMsg = "fetched random HTTP User-Agent header value '%s' from " % userAgent
+        infoMsg += "file '%s'" % paths.USER_AGENTS
         logger.info(infoMsg)
 
         conf.httpHeaders.append((HTTP_HEADER.USER_AGENT, userAgent))
@@ -1579,7 +1580,7 @@ def _createTemporaryDirectory():
         except (OSError, IOError), ex:
             errMsg = "there has been a problem while accessing "
             errMsg += "temporary directory location(s) ('%s')" % getSafeExString(ex)
-            raise SqlmapSystemException, errMsg
+            raise SqlmapSystemException(errMsg)
     else:
         try:
             if not os.path.isdir(tempfile.gettempdir()):
@@ -1606,7 +1607,7 @@ def _createTemporaryDirectory():
         except (OSError, IOError, WindowsError), ex:
             errMsg = "there has been a problem while setting "
             errMsg += "temporary directory location ('%s')" % getSafeExString(ex)
-            raise SqlmapSystemException, errMsg
+            raise SqlmapSystemException(errMsg)
 
 def _cleanupOptions():
     """
@@ -1647,7 +1648,10 @@ def _cleanupOptions():
         conf.rParam = []
 
     if conf.paramDel and '\\' in conf.paramDel:
-        conf.paramDel = conf.paramDel.decode("string_escape")
+        try:
+            conf.paramDel = conf.paramDel.decode("string_escape")
+        except ValueError:
+            pass
 
     if conf.skip:
         conf.skip = conf.skip.replace(" ", "")
@@ -1660,6 +1664,9 @@ def _cleanupOptions():
 
     if conf.delay:
         conf.delay = float(conf.delay)
+
+    if conf.url:
+        conf.url = conf.url.strip()
 
     if conf.rFile:
         conf.rFile = ntToPosixSlashes(normalizePath(conf.rFile))
@@ -1696,8 +1703,17 @@ def _cleanupOptions():
     if conf.os:
         conf.os = conf.os.capitalize()
 
+    if conf.forceDbms:
+        conf.dbms = conf.forceDbms
+
     if conf.dbms:
-        conf.dbms = conf.dbms.capitalize()
+        kb.dbmsFilter = []
+        for _ in conf.dbms.split(','):
+            for dbms, aliases in DBMS_ALIASES:
+                if _.strip().lower() in aliases:
+                    kb.dbmsFilter.append(dbms)
+                    conf.dbms = dbms if conf.dbms and ',' not in conf.dbms else None
+                    break
 
     if conf.testFilter:
         conf.testFilter = conf.testFilter.strip('*+')
@@ -1757,7 +1773,7 @@ def _cleanupOptions():
                 conf.string = conf.string.replace(_.encode("string_escape"), _)
 
     if conf.getAll:
-        map(lambda x: conf.__setitem__(x, True), WIZARD.ALL)
+        map(lambda _: conf.__setitem__(_, True), WIZARD.ALL)
 
     if conf.noCast:
         for _ in DUMP_REPLACEMENTS.keys():
@@ -1772,8 +1788,8 @@ def _cleanupOptions():
     if conf.col:
         conf.col = re.sub(r"\s*,\s*", ',', conf.col)
 
-    if conf.excludeCol:
-        conf.excludeCol = re.sub(r"\s*,\s*", ',', conf.excludeCol)
+    if conf.exclude:
+        conf.exclude = re.sub(r"\s*,\s*", ',', conf.exclude)
 
     if conf.binaryFields:
         conf.binaryFields = re.sub(r"\s*,\s*", ',', conf.binaryFields)
@@ -1877,6 +1893,7 @@ def _setKnowledgeBaseAttributes(flushAll=True):
     kb.cache.addrinfo = {}
     kb.cache.content = {}
     kb.cache.encoding = {}
+    kb.cache.alphaBoundaries = None
     kb.cache.intBoundaries = None
     kb.cache.parsedDbms = {}
     kb.cache.regex = {}
@@ -1902,6 +1919,7 @@ def _setKnowledgeBaseAttributes(flushAll=True):
 
     # Active back-end DBMS fingerprint
     kb.dbms = None
+    kb.dbmsFilter = []
     kb.dbmsVersion = [UNKNOWN_DBMS_VERSION]
 
     kb.delayCandidates = TIME_DELAY_CANDIDATES * [0]
@@ -2020,6 +2038,7 @@ def _setKnowledgeBaseAttributes(flushAll=True):
     kb.uChar = NULL
     kb.unionDuplicates = False
     kb.wafSpecificResponse = None
+    kb.wizardMode = False
     kb.xpCmdshellAvailable = False
 
     if flushAll:
@@ -2087,11 +2106,11 @@ def _useWizardInterface():
             choice = readInput(message, default='1')
 
             if choice == '2':
-                map(lambda x: conf.__setitem__(x, True), WIZARD.INTERMEDIATE)
+                map(lambda _: conf.__setitem__(_, True), WIZARD.INTERMEDIATE)
             elif choice == '3':
-                map(lambda x: conf.__setitem__(x, True), WIZARD.ALL)
+                map(lambda _: conf.__setitem__(_, True), WIZARD.ALL)
             else:
-                map(lambda x: conf.__setitem__(x, True), WIZARD.BASIC)
+                map(lambda _: conf.__setitem__(_, True), WIZARD.BASIC)
 
     logger.debug("muting sqlmap.. it will do the magic for you")
     conf.verbose = 0
@@ -2100,6 +2119,8 @@ def _useWizardInterface():
     conf.threads = 4
 
     dataToStdout("\nsqlmap is running, please wait..\n\n")
+
+    kb.wizardMode = True
 
 def _saveConfig():
     """
@@ -2295,7 +2316,6 @@ def _setTorHttpProxySettings():
         errMsg = "can't establish connection with the Tor HTTP proxy. "
         errMsg += "Please make sure that you have Tor (bundle) installed and setup "
         errMsg += "so you could be able to successfully use switch '--tor' "
-
         raise SqlmapConnectionException(errMsg)
 
     if not conf.checkTor:
@@ -2316,7 +2336,6 @@ def _setTorSocksProxySettings():
         errMsg = "can't establish connection with the Tor SOCKS proxy. "
         errMsg += "Please make sure that you have Tor service installed and setup "
         errMsg += "so you could be able to successfully use switch '--tor' "
-
         raise SqlmapConnectionException(errMsg)
 
     # SOCKS5 to prevent DNS leaks (http://en.wikipedia.org/wiki/Tor_%28anonymity_network%29)
@@ -2329,7 +2348,7 @@ def _checkWebSocket():
             from websocket import ABNF
         except ImportError:
             errMsg = "sqlmap requires third-party module 'websocket-client' "
-            errMsg += "in order to use WebSocket funcionality"
+            errMsg += "in order to use WebSocket functionality"
             raise SqlmapMissingDependence(errMsg)
 
 def _checkTor():
@@ -2370,8 +2389,8 @@ def _basicOptionValidation():
 
     if isinstance(conf.limitStart, int) and conf.limitStart > 0 and \
        isinstance(conf.limitStop, int) and conf.limitStop < conf.limitStart:
-        errMsg = "value for option '--start' (limitStart) must be smaller or equal than value for --stop (limitStop) option"
-        raise SqlmapSyntaxException(errMsg)
+        warnMsg = "usage of option '--start' (limitStart) which is bigger than value for --stop (limitStop) option is considered unstable"
+        logger.warn(warnMsg)
 
     if isinstance(conf.firstChar, int) and conf.firstChar > 0 and \
        isinstance(conf.lastChar, int) and conf.lastChar < conf.firstChar:
@@ -2416,6 +2435,10 @@ def _basicOptionValidation():
 
     if conf.notString and conf.nullConnection:
         errMsg = "option '--not-string' is incompatible with switch '--null-connection'"
+        raise SqlmapSyntaxException(errMsg)
+
+    if conf.notString and conf.nullConnection:
+        errMsg = "option '--tor' is incompatible with switch '--os-pwn'"
         raise SqlmapSyntaxException(errMsg)
 
     if conf.noCast and conf.hexConvert:
@@ -2517,11 +2540,11 @@ def _basicOptionValidation():
         raise SqlmapSyntaxException(errMsg)
 
     if conf.checkTor and not any((conf.tor, conf.proxy)):
-        errMsg = "switch '--check-tor' requires usage of switch '--tor' (or option '--proxy' with HTTP proxy address using Tor)"
+        errMsg = "switch '--check-tor' requires usage of switch '--tor' (or option '--proxy' with HTTP proxy address of Tor service)"
         raise SqlmapSyntaxException(errMsg)
 
     if conf.torPort is not None and not (isinstance(conf.torPort, int) and conf.torPort >= 0 and conf.torPort <= 65535):
-        errMsg = "value for option '--tor-port' must be in range 0-65535"
+        errMsg = "value for option '--tor-port' must be in range [0, 65535]"
         raise SqlmapSyntaxException(errMsg)
 
     if conf.torType not in getPublicTypeMembers(PROXY_TYPE, True):
@@ -2563,15 +2586,15 @@ def _basicOptionValidation():
         errMsg += "format <username>:<password> (e.g. \"root:pass\")"
         raise SqlmapSyntaxException(errMsg)
 
-    if conf.charset:
-        _ = checkCharEncoding(conf.charset, False)
+    if conf.encoding:
+        _ = checkCharEncoding(conf.encoding, False)
         if _ is None:
-            errMsg = "unknown charset '%s'. Please visit " % conf.charset
+            errMsg = "unknown encoding '%s'. Please visit " % conf.encoding
             errMsg += "'%s' to get the full list of " % CODECS_LIST_PAGE
-            errMsg += "supported charsets"
+            errMsg += "supported encodings"
             raise SqlmapSyntaxException(errMsg)
         else:
-            conf.charset = _
+            conf.encoding = _
 
     if conf.loadCookies:
         if not os.path.exists(conf.loadCookies):

