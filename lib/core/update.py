@@ -17,6 +17,7 @@ import zipfile
 
 from lib.core.common import dataToStdout
 from lib.core.common import getSafeExString
+from lib.core.common import getLatestRevision
 from lib.core.common import pollProcess
 from lib.core.common import readInput
 from lib.core.data import conf
@@ -25,6 +26,7 @@ from lib.core.data import paths
 from lib.core.revision import getRevisionNumber
 from lib.core.settings import GIT_REPOSITORY
 from lib.core.settings import IS_WIN
+from lib.core.settings import VERSION
 from lib.core.settings import ZIPBALL_PAGE
 from lib.core.settings import UNICODE_ENCODING
 
@@ -39,6 +41,10 @@ def update():
         warnMsg += "from GitHub (e.g. 'git clone --depth 1 %s sqlmap')" % GIT_REPOSITORY
         logger.warn(warnMsg)
 
+        if VERSION == getLatestRevision():
+            logger.info("already at the latest revision '%s'" % getRevisionNumber())
+            return
+
         message = "do you want to try to fetch the latest 'zipball' from repository and extract it (experimental) ? [y/N]"
         if readInput(message, default='N', boolean=True):
             directory = os.path.abspath(paths.SQLMAP_ROOT_PATH)
@@ -49,6 +55,7 @@ def update():
                 errMsg = "unable to update content of directory '%s' ('%s')" % (directory, getSafeExString(ex))
                 logger.error(errMsg)
             else:
+                attrs = os.stat(os.path.join(directory, "sqlmap.py")).st_mode
                 for wildcard in ('*', ".*"):
                     for _ in glob.glob(os.path.join(directory, wildcard)):
                         try:
@@ -83,6 +90,11 @@ def update():
                     else:
                         if not success:
                             logger.error("update could not be completed")
+                        else:
+                            try:
+                                os.chmod(os.path.join(directory, "sqlmap.py"), attrs)
+                            except OSError:
+                                logger.warning("could not set the file attributes of '%s'" % os.path.join(directory, "sqlmap.py"))
     else:
         infoMsg = "updating sqlmap to the latest development revision from the "
         infoMsg += "GitHub repository"

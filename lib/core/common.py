@@ -5,6 +5,7 @@ Copyright (c) 2006-2018 sqlmap developers (http://sqlmap.org/)
 See the file 'LICENSE' for copying permission
 """
 
+import binascii
 import codecs
 import contextlib
 import cookielib
@@ -101,7 +102,10 @@ from lib.core.settings import BOUNDED_INJECTION_MARKER
 from lib.core.settings import BRUTE_DOC_ROOT_PREFIXES
 from lib.core.settings import BRUTE_DOC_ROOT_SUFFIXES
 from lib.core.settings import BRUTE_DOC_ROOT_TARGET_MARK
+from lib.core.settings import BURP_REQUEST_REGEX
+from lib.core.settings import BURP_XML_HISTORY_REGEX
 from lib.core.settings import DBMS_DIRECTORY_DICT
+from lib.core.settings import CRAWL_EXCLUDE_EXTENSIONS
 from lib.core.settings import CUSTOM_INJECTION_MARK_CHAR
 from lib.core.settings import DEFAULT_COOKIE_DELIMITER
 from lib.core.settings import DEFAULT_GET_POST_DELIMITER
@@ -139,6 +143,7 @@ from lib.core.settings import PARTIAL_VALUE_MARKER
 from lib.core.settings import PAYLOAD_DELIMITER
 from lib.core.settings import PLATFORM
 from lib.core.settings import PRINTABLE_CHAR_REGEX
+from lib.core.settings import PROBLEMATIC_CUSTOM_INJECTION_PATTERNS
 from lib.core.settings import PUSH_VALUE_EXCEPTION_RETRY_COUNT
 from lib.core.settings import PYVERSION
 from lib.core.settings import REFERER_ALIASES
@@ -161,6 +166,7 @@ from lib.core.settings import URLENCODE_CHAR_LIMIT
 from lib.core.settings import URLENCODE_FAILSAFE_CHARS
 from lib.core.settings import USER_AGENT_ALIASES
 from lib.core.settings import VERSION_STRING
+from lib.core.settings import WEBSCARAB_SPLITTER
 from lib.core.threads import getCurrentThreadData
 from lib.utils.sqlalchemy import _sqlalchemy
 from thirdparty.clientform.clientform import ParseResponse
@@ -862,11 +868,11 @@ def boldifyMessage(message):
     retVal = message
 
     if any(_ in message for _ in BOLD_PATTERNS):
-        retVal = setColor(message, True)
+        retVal = setColor(message, bold=True)
 
     return retVal
 
-def setColor(message, bold=False):
+def setColor(message, color=None, bold=False):
     retVal = message
     level = extractRegexResult(r"\[(?P<result>%s)\]" % '|'.join(_[0] for _ in getPublicTypeMembers(LOGGING_LEVELS)), message) or kb.get("stickyLevel")
 
@@ -874,15 +880,11 @@ def setColor(message, bold=False):
         level = unicodeencode(level)
 
     if message and getattr(LOGGER_HANDLER, "is_tty", False):  # colorizing handler
-        if bold:
-            retVal = colored(message, color=None, on_color=None, attrs=("bold",))
+        if bold or color:
+            retVal = colored(message, color=color, on_color=None, attrs=("bold",) if bold else None)
         elif level:
             level = getattr(logging, level, None) if isinstance(level, basestring) else level
-            _ = LOGGER_HANDLER.level_map.get(level)
-            if _:
-                background, foreground, bold = _
-                retVal = colored(message, color=foreground, on_color="on_%s" % background if background else None, attrs=("bold",) if bold else None)
-
+            retVal = LOGGER_HANDLER.colorize(message, level)
             kb.stickyLevel = level if message and message[-1] != "\n" else None
 
     return retVal
@@ -923,7 +925,7 @@ def dataToStdout(data, forceOutput=False, bold=False, content_type=None, status=
                 if conf.get("api"):
                     sys.stdout.write(message, status, content_type)
                 else:
-                    sys.stdout.write(setColor(message, bold))
+                    sys.stdout.write(setColor(message, bold=bold))
 
                 sys.stdout.flush()
             except IOError:
@@ -1015,14 +1017,17 @@ def readInput(message, default=None, checkBatch=True, boolean=False):
             elif answer is None and retVal:
                 retVal = "%s,%s" % (retVal, getUnicode(item, UNICODE_ENCODING))
 
+    if message and getattr(LOGGER_HANDLER, "is_tty", False):
+        message = "\r%s" % message
+
     if retVal:
-        dataToStdout("\r%s%s\n" % (message, retVal), forceOutput=not kb.wizardMode, bold=True)
+        dataToStdout("%s%s\n" % (message, retVal), forceOutput=not kb.wizardMode, bold=True)
 
         debugMsg = "used the given answer"
         logger.debug(debugMsg)
 
     if retVal is None:
-        if checkBatch and conf.get("batch"):
+        if checkBatch and conf.get("batch") or conf.get("api"):
             if isListLike(default):
                 options = ','.join(getUnicode(opt, UNICODE_ENCODING) for opt in default)
             elif default:
@@ -1030,7 +1035,7 @@ def readInput(message, default=None, checkBatch=True, boolean=False):
             else:
                 options = unicode()
 
-            dataToStdout("\r%s%s\n" % (message, options), forceOutput=not kb.wizardMode, bold=True)
+            dataToStdout("%s%s\n" % (message, options), forceOutput=not kb.wizardMode, bold=True)
 
             debugMsg = "used the default behavior, running in batch mode"
             logger.debug(debugMsg)
@@ -1043,7 +1048,7 @@ def readInput(message, default=None, checkBatch=True, boolean=False):
                 if conf.get("beep"):
                     beep()
 
-                dataToStdout("\r%s" % message, forceOutput=not kb.wizardMode, bold=True)
+                dataToStdout("%s" % message, forceOutput=not kb.wizardMode, bold=True)
                 kb.prependFlag = False
 
                 retVal = raw_input().strip() or default
@@ -1264,11 +1269,15 @@ def setPaths(rootPath):
     paths.SQLMAP_DUMP_PATH = os.path.join(paths.SQLMAP_OUTPUT_PATH, "%s", "dump")
     paths.SQLMAP_FILES_PATH = os.path.join(paths.SQLMAP_OUTPUT_PATH, "%s", "files")
 
+    # history files
+    paths.SQLMAP_HISTORY_PATH = getUnicode(os.path.join(_, "history"), encoding=sys.getfilesystemencoding() or UNICODE_ENCODING)
+    paths.API_SHELL_HISTORY = os.path.join(paths.SQLMAP_HISTORY_PATH, "api.hst")
+    paths.OS_SHELL_HISTORY = os.path.join(paths.SQLMAP_HISTORY_PATH, "os.hst")
+    paths.SQL_SHELL_HISTORY = os.path.join(paths.SQLMAP_HISTORY_PATH, "sql.hst")
+    paths.SQLMAP_SHELL_HISTORY = os.path.join(paths.SQLMAP_HISTORY_PATH, "sqlmap.hst")
+    paths.GITHUB_HISTORY = os.path.join(paths.SQLMAP_HISTORY_PATH, "github.hst")
+
     # sqlmap files
-    paths.OS_SHELL_HISTORY = os.path.join(_, "os.hst")
-    paths.SQL_SHELL_HISTORY = os.path.join(_, "sql.hst")
-    paths.SQLMAP_SHELL_HISTORY = os.path.join(_, "sqlmap.hst")
-    paths.GITHUB_HISTORY = os.path.join(_, "github.hst")
     paths.CHECKSUM_MD5 = os.path.join(paths.SQLMAP_TXT_PATH, "checksum.md5")
     paths.COMMON_COLUMNS = os.path.join(paths.SQLMAP_TXT_PATH, "common-columns.txt")
     paths.COMMON_TABLES = os.path.join(paths.SQLMAP_TXT_PATH, "common-tables.txt")
@@ -1288,7 +1297,7 @@ def setPaths(rootPath):
     paths.PGSQL_XML = os.path.join(paths.SQLMAP_XML_BANNER_PATH, "postgresql.xml")
 
     for path in paths.values():
-        if any(path.endswith(_) for _ in (".txt", ".xml", ".zip")):
+        if any(path.endswith(_) for _ in (".md5", ".txt", ".xml", ".zip")):
             checkFile(path)
 
 def weAreFrozen():
@@ -1308,13 +1317,11 @@ def parseTargetDirect():
     if not conf.direct:
         return
 
-    conf.direct = conf.direct.encode(UNICODE_ENCODING)  # some DBMS connectors (e.g. pymssql) don't like Unicode with non-US letters
-
     details = None
     remote = False
 
     for dbms in SUPPORTED_DBMS:
-        details = re.search("^(?P<dbms>%s)://(?P<credentials>(?P<user>.+?)\:(?P<pass>.*)\@)?(?P<remote>(?P<hostname>[\w.-]+?)\:(?P<port>[\d]+)\/)?(?P<db>[\w\d\ \:\.\_\-\/\\\\]+?)$" % dbms, conf.direct, re.I)
+        details = re.search(r"^(?P<dbms>%s)://(?P<credentials>(?P<user>.+?)\:(?P<pass>.*)\@)?(?P<remote>(?P<hostname>[\w.-]+?)\:(?P<port>[\d]+)\/)?(?P<db>[\w\d\ \:\.\_\-\/\\]+?)$" % dbms, conf.direct, re.I)
 
         if details:
             conf.dbms = details.group("dbms")
@@ -1384,6 +1391,10 @@ def parseTargetDirect():
                     __import__("psycopg2")
                 elif dbmsName == DBMS.ORACLE:
                     __import__("cx_Oracle")
+
+                    # Reference: http://itsiti.com/ora-28009-connection-sys-sysdba-sysoper
+                    if (conf.dbmsUser or "").upper() == "SYS":
+                        conf.direct = "%s?mode=SYSDBA" % conf.direct
                 elif dbmsName == DBMS.SQLITE:
                     __import__("sqlite3")
                 elif dbmsName == DBMS.ACCESS:
@@ -1416,7 +1427,7 @@ def parseTargetUrl():
         errMsg += "on this platform"
         raise SqlmapGenericException(errMsg)
 
-    if not re.search(r"^http[s]*://", conf.url, re.I) and not re.search(r"^ws[s]*://", conf.url, re.I):
+    if not re.search(r"^https?://", conf.url, re.I) and not re.search(r"^wss?://", conf.url, re.I):
         if re.search(r":443\b", conf.url):
             conf.url = "https://%s" % conf.url
         else:
@@ -1433,7 +1444,7 @@ def parseTargetUrl():
         errMsg += "in the hostname part"
         raise SqlmapGenericException(errMsg)
 
-    hostnamePort = urlSplit.netloc.split(":") if not re.search(r"\[.+\]", urlSplit.netloc) else filter(None, (re.search("\[.+\]", urlSplit.netloc).group(0), re.search(r"\](:(?P<port>\d+))?", urlSplit.netloc).group("port")))
+    hostnamePort = urlSplit.netloc.split(":") if not re.search(r"\[.+\]", urlSplit.netloc) else filter(None, (re.search(r"\[.+\]", urlSplit.netloc).group(0), re.search(r"\](:(?P<port>\d+))?", urlSplit.netloc).group("port")))
 
     conf.scheme = (urlSplit.scheme.strip().lower() or "http") if not conf.forceSSL else "https"
     conf.path = urlSplit.path.strip()
@@ -1493,6 +1504,23 @@ def parseTargetUrl():
     if conf.url != originalUrl:
         kb.originalUrls[conf.url] = originalUrl
 
+def escapeJsonValue(value):
+    """
+    Escapes JSON value (used in payloads)
+
+    # Reference: https://stackoverflow.com/a/16652683
+    """
+
+    retVal = ""
+
+    for char in value:
+        if char < ' ' or char == '"':
+            retVal += json.dumps(char)[1:-1]
+        else:
+            retVal += char
+
+    return retVal
+
 def expandAsteriskForColumns(expression):
     """
     If the user provided an asterisk rather than the column(s)
@@ -1500,14 +1528,14 @@ def expandAsteriskForColumns(expression):
     the SQL query string (expression)
     """
 
-    asterisk = re.search(r"(?i)\ASELECT(\s+TOP\s+[\d]+)?\s+\*\s+FROM\s+`?([^`\s()]+)", expression)
+    match = re.search(r"(?i)\ASELECT(\s+TOP\s+[\d]+)?\s+\*\s+FROM\s+`?([^`\s()]+)", expression)
 
-    if asterisk:
+    if match:
         infoMsg = "you did not provide the fields in your query. "
         infoMsg += "sqlmap will retrieve the column names itself"
         logger.info(infoMsg)
 
-        _ = asterisk.group(2).replace("..", '.').replace(".dbo.", '.')
+        _ = match.group(2).replace("..", '.').replace(".dbo.", '.')
         db, conf.tbl = _.split('.', 1) if '.' in _ else (None, _)
 
         if db is None:
@@ -1842,8 +1870,7 @@ def getFilteredPageContent(page, onlyText=True, split=" "):
     # only if the page's charset has been successfully identified
     if isinstance(page, unicode):
         retVal = re.sub(r"(?si)<script.+?</script>|<!--.+?-->|<style.+?</style>%s" % (r"|<[^>]+>|\t|\n|\r" if onlyText else ""), split, page)
-        while retVal.find(2 * split) != -1:
-            retVal = retVal.replace(2 * split, split)
+        retVal = re.sub(r"%s{2,}" % split, split, retVal)
         retVal = htmlunescape(retVal.strip().strip(split))
 
     return retVal
@@ -2136,7 +2163,7 @@ def initCommonOutputs():
                     if line not in kb.commonOutputs[key]:
                         kb.commonOutputs[key].add(line)
 
-def getFileItems(filename, commentPrefix='#', unicode_=True, lowercase=False, unique=False):
+def getFileItems(filename, commentPrefix='#', unicoded=True, lowercase=False, unique=False):
     """
     Returns newline delimited items contained inside file
     """
@@ -2149,19 +2176,13 @@ def getFileItems(filename, commentPrefix='#', unicode_=True, lowercase=False, un
     checkFile(filename)
 
     try:
-        with openFile(filename, 'r', errors="ignore") if unicode_ else open(filename, 'r') as f:
-            for line in (f.readlines() if unicode_ else f.xreadlines()):  # xreadlines doesn't return unicode strings when codec.open() is used
+        with openFile(filename, 'r', errors="ignore") if unicoded else open(filename, 'r') as f:
+            for line in (f.readlines() if unicoded else f.xreadlines()):  # xreadlines doesn't return unicode strings when codec.open() is used
                 if commentPrefix:
                     if line.find(commentPrefix) != -1:
                         line = line[:line.find(commentPrefix)]
 
                 line = line.strip()
-
-                if not unicode_:
-                    try:
-                        line = str.encode(line)
-                    except UnicodeDecodeError:
-                        continue
 
                 if line:
                     if lowercase:
@@ -2662,7 +2683,7 @@ def logHTTPTraffic(requestLogMsg, responseLogMsg, startTime=None, endTime=None):
             dataToTrafficFile("%s%s" % (responseLogMsg, os.linesep))
             dataToTrafficFile("%s%s%s%s" % (os.linesep, 76 * '#', os.linesep, os.linesep))
 
-def getPageTemplate(payload, place):  # Cross-linked function
+def getPageTemplate(payload, place):  # Cross-referenced function
     raise NotImplementedError
 
 @cachedmethod
@@ -3280,14 +3301,17 @@ def checkIntegrity():
     logger.debug("running code integrity check")
 
     retVal = True
-    for checksum, _ in (re.split(r'\s+', _) for _ in getFileItems(paths.CHECKSUM_MD5)):
-        path = os.path.normpath(os.path.join(paths.SQLMAP_ROOT_PATH, _))
-        if not os.path.isfile(path):
-            logger.error("missing file detected '%s'" % path)
-            retVal = False
-        elif md5File(path) != checksum:
-            logger.error("wrong checksum of file '%s' detected" % path)
-            retVal = False
+
+    if os.path.isfile(paths.CHECKSUM_MD5):
+        for checksum, _ in (re.split(r'\s+', _) for _ in getFileItems(paths.CHECKSUM_MD5)):
+            path = os.path.normpath(os.path.join(paths.SQLMAP_ROOT_PATH, _))
+            if not os.path.isfile(path):
+                logger.error("missing file detected '%s'" % path)
+                retVal = False
+            elif md5File(path) != checksum:
+                logger.error("wrong checksum of file '%s' detected" % path)
+                retVal = False
+
     return retVal
 
 def unhandledExceptionMessage():
@@ -3321,6 +3345,22 @@ def unhandledExceptionMessage():
 
     return errMsg
 
+def getLatestRevision():
+    """
+    Retrieves latest revision from the offical repository
+    """
+
+    retVal = None
+    req = urllib2.Request(url="https://raw.githubusercontent.com/sqlmapproject/sqlmap/master/lib/core/settings.py")
+
+    try:
+        content = urllib2.urlopen(req).read()
+        retVal = extractRegexResult(r"VERSION\s*=\s*[\"'](?P<result>[\d.]+)", content)
+    except:
+        pass
+
+    return retVal
+
 def createGithubIssue(errMsg, excMsg):
     """
     Automatically create a Github issue with unhandled exception information
@@ -3335,7 +3375,7 @@ def createGithubIssue(errMsg, excMsg):
 
     _ = re.sub(r"'[^']+'", "''", excMsg)
     _ = re.sub(r"\s+line \d+", "", _)
-    _ = re.sub(r'File ".+?/(\w+\.py)', "\g<1>", _)
+    _ = re.sub(r'File ".+?/(\w+\.py)', r"\g<1>", _)
     _ = re.sub(r".+\Z", "", _)
     key = hashlib.md5(_).hexdigest()[:8]
 
@@ -3346,7 +3386,7 @@ def createGithubIssue(errMsg, excMsg):
     msg += "with the unhandled exception information at "
     msg += "the official Github repository? [y/N] "
     try:
-        choice = readInput(msg, default='N', boolean=True)
+        choice = readInput(msg, default='N', checkBatch=False, boolean=True)
     except:
         choice = None
 
@@ -3413,10 +3453,9 @@ def maskSensitiveData(msg):
             value = extractRegexResult(regex, retVal)
             retVal = retVal.replace(value, '*' * len(value))
 
-    if not conf.get("hostname"):
-        match = re.search(r"(?i)sqlmap.+(-u|--url)(\s+|=)([^ ]+)", retVal)
-        if match:
-            retVal = retVal.replace(match.group(3), '*' * len(match.group(3)))
+    # Just in case (for problematic parameters regarding user encoding)
+    for match in re.finditer(r"(?i)[ -]-(u|url|data|cookie)( |=)(.*?)(?= -?-[a-z]|\Z)", retVal):
+        retVal = retVal.replace(match.group(3), '*' * len(match.group(3)))
 
     if getpass.getuser():
         retVal = re.sub(r"(?i)\b%s\b" % re.escape(getpass.getuser()), '*' * len(getpass.getuser()), retVal)
@@ -3502,6 +3541,7 @@ def removeReflectiveValues(content, payload, suppressWarning=False):
                         regex = r"%s\b" % regex
 
                     _retVal = [retVal]
+
                     def _thread(regex):
                         try:
                             _retVal[0] = re.sub(r"(?i)%s" % regex, REFLECTED_VALUE_MARKER, _retVal[0])
@@ -3722,7 +3762,7 @@ def expandMnemonics(mnemonics, parser, args):
                 logger.debug(debugMsg)
             else:
                 found = sorted(options.keys(), key=lambda x: len(x))[0]
-                warnMsg = "detected ambiguity (mnemonic '%s' can be resolved to: %s). " % (name, ", ".join("'%s'" % key for key in options.keys()))
+                warnMsg = "detected ambiguity (mnemonic '%s' can be resolved to any of: %s). " % (name, ", ".join("'%s'" % key for key in options.keys()))
                 warnMsg += "Resolved to shortest of those ('%s')" % found
                 logger.warn(warnMsg)
 
@@ -3870,7 +3910,7 @@ def asciifyUrl(url, forceQuote=False):
         #     urllib.quote(s.replace('%', '')) != s.replace('%', '')
         # which would trigger on all %-characters, e.g. "&".
         if getUnicode(s).encode("ascii", "replace") != s or forceQuote:
-            return urllib.quote(s.encode(UNICODE_ENCODING), safe=safe)
+            return urllib.quote(s.encode(UNICODE_ENCODING) if isinstance(s, unicode) else s, safe=safe)
         return s
 
     username = quote(parts.username, '')
@@ -3928,12 +3968,16 @@ def isAdminFromPrivileges(privileges):
 def findPageForms(content, url, raise_=False, addToTargets=False):
     """
     Parses given page content for possible forms
+
+    >>> findPageForms('<html><form action="/input.php" method="POST"><input type="text" name="id" value="1"><input type="submit" value="Submit"></form></html>', '')
+    set([(u'/input.php', 'POST', u'id=1', None, None)])
     """
 
     class _(StringIO):
         def __init__(self, content, url):
             StringIO.__init__(self, unicodeencode(content, kb.pageEncoding) if isinstance(content, unicode) else content)
             self._url = url
+
         def geturl(self):
             return self._url
 
@@ -3950,8 +3994,6 @@ def findPageForms(content, url, raise_=False, addToTargets=False):
 
     try:
         forms = ParseResponse(response, backwards_compat=False)
-    except (UnicodeError, ValueError):
-        pass
     except ParseError:
         if re.search(r"(?i)<!DOCTYPE html|<html", content or ""):
             warnMsg = "badly formed HTML at the given URL ('%s'). Going to filter it" % url
@@ -3967,6 +4009,8 @@ def findPageForms(content, url, raise_=False, addToTargets=False):
                         raise SqlmapGenericException(errMsg)
                     else:
                         logger.debug(errMsg)
+    except:
+        pass
 
     if forms:
         for form in forms:
@@ -4059,7 +4103,7 @@ def getHostHeader(url):
         retVal = urlparse.urlparse(url).netloc
 
         if re.search(r"http(s)?://\[.+\]", url, re.I):
-            retVal = extractRegexResult("http(s)?://\[(?P<result>.+)\]", url)
+            retVal = extractRegexResult(r"http(s)?://\[(?P<result>.+)\]", url)
         elif any(retVal.endswith(':%d' % _) for _ in (80, 443)):
             retVal = retVal.split(':')[0]
 
@@ -4071,6 +4115,7 @@ def checkDeprecatedOptions(args):
     """
 
     for _ in args:
+        _ = _.split('=')[0].strip()
         if _ in DEPRECATED_OPTIONS:
             errMsg = "switch/option '%s' is deprecated" % _
             if DEPRECATED_OPTIONS[_]:
@@ -4239,9 +4284,11 @@ def extractExpectedValue(value, expected):
                 value = value.strip().lower()
                 if value in ("true", "false"):
                     value = value == "true"
+                elif value in ('t', 'f'):
+                    value = value == 't'
                 elif value in ("1", "-1"):
                     value = True
-                elif value == "0":
+                elif value == '0':
                     value = False
                 else:
                     value = None
@@ -4256,7 +4303,7 @@ def hashDBWrite(key, value, serialize=False):
     Helper function for writing session data to HashDB
     """
 
-    _ = "%s%s%s" % (conf.url or "%s%s" % (conf.hostname, conf.port), key, HASHDB_MILESTONE_VALUE)
+    _ = '|'.join((str(_) if not isinstance(_, basestring) else _) for _ in (conf.hostname, conf.path.strip('/') if conf.path is not None else conf.port, key, HASHDB_MILESTONE_VALUE))
     conf.hashDB.write(_, value, serialize)
 
 def hashDBRetrieve(key, unserialize=False, checkConf=False):
@@ -4264,7 +4311,7 @@ def hashDBRetrieve(key, unserialize=False, checkConf=False):
     Helper function for restoring session data from HashDB
     """
 
-    _ = "%s%s%s" % (conf.url or "%s%s" % (conf.hostname, conf.port), key, HASHDB_MILESTONE_VALUE)
+    _ = '|'.join((str(_) if not isinstance(_, basestring) else _) for _ in (conf.hostname, conf.path.strip('/') if conf.path is not None else conf.port, key, HASHDB_MILESTONE_VALUE))
     retVal = conf.hashDB.retrieve(_, unserialize) if kb.resumeValues and not (checkConf and any((conf.flushSession, conf.freshQueries))) else None
 
     if not kb.inferenceMode and not kb.fileReadMode and isinstance(retVal, basestring) and any(_ in retVal for _ in (PARTIAL_VALUE_MARKER, PARTIAL_HEX_VALUE_MARKER)):
@@ -4316,7 +4363,7 @@ def resetCookieJar(cookieJar):
 
         except cookielib.LoadError, msg:
             errMsg = "there was a problem loading "
-            errMsg += "cookies file ('%s')" % re.sub(r"(cookies) file '[^']+'", "\g<1>", str(msg))
+            errMsg += "cookies file ('%s')" % re.sub(r"(cookies) file '[^']+'", r"\g<1>", str(msg))
             raise SqlmapGenericException(errMsg)
 
 def decloakToTemp(filename):
@@ -4362,7 +4409,7 @@ def getRequestHeader(request, name):
 
     retVal = None
 
-    if request and name:
+    if request and request.headers and name:
         _ = name.upper()
         retVal = max(value if _ == key.upper() else None for key, value in request.header_items())
 
@@ -4443,6 +4490,195 @@ def pollProcess(process, suppress_errors=False):
 
             break
 
+def parseRequestFile(reqFile, checkParams=True):
+    """
+    Parses WebScarab and Burp logs and adds results to the target URL list
+    """
+
+    def _parseWebScarabLog(content):
+        """
+        Parses WebScarab logs (POST method not supported)
+        """
+
+        reqResList = content.split(WEBSCARAB_SPLITTER)
+
+        for request in reqResList:
+            url = extractRegexResult(r"URL: (?P<result>.+?)\n", request, re.I)
+            method = extractRegexResult(r"METHOD: (?P<result>.+?)\n", request, re.I)
+            cookie = extractRegexResult(r"COOKIE: (?P<result>.+?)\n", request, re.I)
+
+            if not method or not url:
+                logger.debug("not a valid WebScarab log data")
+                continue
+
+            if method.upper() == HTTPMETHOD.POST:
+                warnMsg = "POST requests from WebScarab logs aren't supported "
+                warnMsg += "as their body content is stored in separate files. "
+                warnMsg += "Nevertheless you can use -r to load them individually."
+                logger.warning(warnMsg)
+                continue
+
+            if not(conf.scope and not re.search(conf.scope, url, re.I)):
+                yield (url, method, None, cookie, tuple())
+
+    def _parseBurpLog(content):
+        """
+        Parses Burp logs
+        """
+
+        if not re.search(BURP_REQUEST_REGEX, content, re.I | re.S):
+            if re.search(BURP_XML_HISTORY_REGEX, content, re.I | re.S):
+                reqResList = []
+                for match in re.finditer(BURP_XML_HISTORY_REGEX, content, re.I | re.S):
+                    port, request = match.groups()
+                    try:
+                        request = request.decode("base64")
+                    except binascii.Error:
+                        continue
+                    _ = re.search(r"%s:.+" % re.escape(HTTP_HEADER.HOST), request)
+                    if _:
+                        host = _.group(0).strip()
+                        if not re.search(r":\d+\Z", host):
+                            request = request.replace(host, "%s:%d" % (host, int(port)))
+                    reqResList.append(request)
+            else:
+                reqResList = [content]
+        else:
+            reqResList = re.finditer(BURP_REQUEST_REGEX, content, re.I | re.S)
+
+        for match in reqResList:
+            request = match if isinstance(match, basestring) else match.group(0)
+            request = re.sub(r"\A[^\w]+", "", request)
+
+            schemePort = re.search(r"(http[\w]*)\:\/\/.*?\:([\d]+).+?={10,}", request, re.I | re.S)
+
+            if schemePort:
+                scheme = schemePort.group(1)
+                port = schemePort.group(2)
+                request = re.sub(r"\n=+\Z", "", request.split(schemePort.group(0))[-1].lstrip())
+            else:
+                scheme, port = None, None
+
+            if not re.search(r"^[\n]*(%s).*?\sHTTP\/" % "|".join(getPublicTypeMembers(HTTPMETHOD, True)), request, re.I | re.M):
+                continue
+
+            if re.search(r"^[\n]*%s.*?\.(%s)\sHTTP\/" % (HTTPMETHOD.GET, "|".join(CRAWL_EXCLUDE_EXTENSIONS)), request, re.I | re.M):
+                continue
+
+            getPostReq = False
+            url = None
+            host = None
+            method = None
+            data = None
+            cookie = None
+            params = False
+            newline = None
+            lines = request.split('\n')
+            headers = []
+
+            for index in xrange(len(lines)):
+                line = lines[index]
+
+                if not line.strip() and index == len(lines) - 1:
+                    break
+
+                newline = "\r\n" if line.endswith('\r') else '\n'
+                line = line.strip('\r')
+                match = re.search(r"\A(%s) (.+) HTTP/[\d.]+\Z" % "|".join(getPublicTypeMembers(HTTPMETHOD, True)), line) if not method else None
+
+                if len(line.strip()) == 0 and method and method != HTTPMETHOD.GET and data is None:
+                    data = ""
+                    params = True
+
+                elif match:
+                    method = match.group(1)
+                    url = match.group(2)
+
+                    if any(_ in line for _ in ('?', '=', kb.customInjectionMark)):
+                        params = True
+
+                    getPostReq = True
+
+                # POST parameters
+                elif data is not None and params:
+                    data += "%s%s" % (line, newline)
+
+                # GET parameters
+                elif "?" in line and "=" in line and ": " not in line:
+                    params = True
+
+                # Headers
+                elif re.search(r"\A\S+:", line):
+                    key, value = line.split(":", 1)
+                    value = value.strip().replace("\r", "").replace("\n", "")
+
+                    # Cookie and Host headers
+                    if key.upper() == HTTP_HEADER.COOKIE.upper():
+                        cookie = value
+                    elif key.upper() == HTTP_HEADER.HOST.upper():
+                        if '://' in value:
+                            scheme, value = value.split('://')[:2]
+                        splitValue = value.split(":")
+                        host = splitValue[0]
+
+                        if len(splitValue) > 1:
+                            port = filterStringValue(splitValue[1], "[0-9]")
+
+                    # Avoid to add a static content length header to
+                    # headers and consider the following lines as
+                    # POSTed data
+                    if key.upper() == HTTP_HEADER.CONTENT_LENGTH.upper():
+                        params = True
+
+                    # Avoid proxy and connection type related headers
+                    elif key not in (HTTP_HEADER.PROXY_CONNECTION, HTTP_HEADER.CONNECTION):
+                        headers.append((getUnicode(key), getUnicode(value)))
+
+                    if kb.customInjectionMark in re.sub(PROBLEMATIC_CUSTOM_INJECTION_PATTERNS, "", value or ""):
+                        params = True
+
+            data = data.rstrip("\r\n") if data else data
+
+            if getPostReq and (params or cookie or not checkParams):
+                if not port and isinstance(scheme, basestring) and scheme.lower() == "https":
+                    port = "443"
+                elif not scheme and port == "443":
+                    scheme = "https"
+
+                if conf.forceSSL:
+                    scheme = "https"
+                    port = port or "443"
+
+                if not host:
+                    errMsg = "invalid format of a request file"
+                    raise SqlmapSyntaxException(errMsg)
+
+                if not url.startswith("http"):
+                    url = "%s://%s:%s%s" % (scheme or "http", host, port or "80", url)
+                    scheme = None
+                    port = None
+
+                if not(conf.scope and not re.search(conf.scope, url, re.I)):
+                    yield (url, conf.method or method, data, cookie, tuple(headers))
+
+    checkFile(reqFile)
+    try:
+        with openFile(reqFile, "rb") as f:
+            content = f.read()
+    except (IOError, OSError, MemoryError), ex:
+        errMsg = "something went wrong while trying "
+        errMsg += "to read the content of file '%s' ('%s')" % (reqFile, getSafeExString(ex))
+        raise SqlmapSystemException(errMsg)
+
+    if conf.scope:
+        logger.info("using regular expression '%s' for filtering targets" % conf.scope)
+
+    for target in _parseBurpLog(content):
+        yield target
+
+    for target in _parseWebScarabLog(content):
+        yield target
+
 def getSafeExString(ex, encoding=None):
     """
     Safe way how to get the proper exception represtation as a string
@@ -4466,3 +4702,13 @@ def safeVariableNaming(value):
 
 def unsafeVariableNaming(value):
     return re.sub(r"%s([0-9a-f]{2})" % SAFE_VARIABLE_MARKER, lambda match: match.group(1).decode("hex"), value)
+
+def firstNotNone(*args):
+    retVal = None
+
+    for _ in args:
+        if _ is not None:
+            retVal = _
+            break
+
+    return retVal

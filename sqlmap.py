@@ -57,6 +57,7 @@ try:
     from lib.core.exception import SqlmapUserQuitException
     from lib.core.option import initOptions
     from lib.core.option import init
+    from lib.core.patch import dirtyPatches
     from lib.core.settings import GIT_PAGE
     from lib.core.settings import IS_WIN
     from lib.core.settings import LEGAL_DISCLAIMER
@@ -108,13 +109,13 @@ def checkEnvironment():
         for _ in ("SqlmapBaseException", "SqlmapShellQuitException", "SqlmapSilentQuitException", "SqlmapUserQuitException"):
             globals()[_] = getattr(sys.modules["lib.core.exception"], _)
 
-
 def main():
     """
     Main function of sqlmap when running from command line.
     """
 
     try:
+        dirtyPatches()
         checkEnvironment()
         setPaths(modulePath())
         banner()
@@ -142,10 +143,7 @@ def main():
 
         if not conf.updateAll:
             # Postponed imports (faster start)
-            if conf.profile:
-                from lib.core.profiling import profile
-                profile()
-            elif conf.smokeTest:
+            if conf.smokeTest:
                 from lib.core.testing import smokeTest
                 smokeTest()
             elif conf.liveTest:
@@ -153,15 +151,20 @@ def main():
                 liveTest()
             else:
                 from lib.controller.controller import start
-                try:
-                    start()
-                except thread.error as ex:
-                    if "can't start new thread" in getSafeExString(ex):
-                        errMsg = "unable to start new threads. Please check OS (u)limits"
-                        logger.critical(errMsg)
-                        raise SystemExit
-                    else:
-                        raise
+                if conf.profile:
+                    from lib.core.profiling import profile
+                    globals()["start"] = start
+                    profile()
+                else:
+                    try:
+                        start()
+                    except thread.error as ex:
+                        if "can't start new thread" in getSafeExString(ex):
+                            errMsg = "unable to start new threads. Please check OS (u)limits"
+                            logger.critical(errMsg)
+                            raise SystemExit
+                        else:
+                            raise
 
     except SqlmapUserQuitException:
         errMsg = "user quit"
@@ -265,8 +268,21 @@ def main():
                 raise SystemExit
 
             elif all(_ in excMsg for _ in ("twophase", "sqlalchemy")):
-                errMsg = "please update the 'sqlalchemy' package"
-                errMsg += "(Reference: https://github.com/apache/incubator-superset/issues/3447)"
+                errMsg = "please update the 'sqlalchemy' package (>= 1.1.11) "
+                errMsg += "(Reference: https://qiita.com/tkprof/items/7d7b2d00df9c5f16fffe)"
+                logger.error(errMsg)
+                raise SystemExit
+
+            elif all(_ in excMsg for _ in ("scramble_caching_sha2", "TypeError")):
+                errMsg = "please downgrade the 'PyMySQL' package (=< 0.8.1) "
+                errMsg += "(Reference: https://github.com/PyMySQL/PyMySQL/issues/700)"
+                logger.error(errMsg)
+                raise SystemExit
+
+            elif "must be pinned buffer, not bytearray" in excMsg:
+                errMsg = "error occurred at Python interpreter which "
+                errMsg += "is fixed in 2.7.x. Please update accordingly "
+                errMsg += "(Reference: https://bugs.python.org/issue8104)"
                 logger.error(errMsg)
                 raise SystemExit
 
@@ -305,7 +321,7 @@ def main():
                 logger.error(errMsg)
                 raise SystemExit
 
-            elif "valueStack.pop" in excMsg and kb.get("dumpKeyboardInterrupt"):
+            elif kb.get("dumpKeyboardInterrupt"):
                 raise SystemExit
 
             elif any(_ in excMsg for _ in ("Broken pipe",)):
@@ -315,7 +331,11 @@ def main():
                 file_ = match.group(1)
                 file_ = os.path.relpath(file_, os.path.dirname(__file__))
                 file_ = file_.replace("\\", '/')
-                file_ = re.sub(r"\.\./", '/', file_).lstrip('/')
+                if "../" in file_:
+                    file_ = re.sub(r"(\.\./)+", '/', file_)
+                else:
+                    file_ = file_.lstrip('/')
+                file_ = re.sub(r"/{2,}", '/', file_)
                 excMsg = excMsg.replace(match.group(1), file_)
 
             errMsg = maskSensitiveData(errMsg)

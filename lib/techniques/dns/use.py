@@ -33,7 +33,6 @@ from lib.core.settings import PARTIAL_VALUE_MARKER
 from lib.core.unescaper import unescaper
 from lib.request.connect import Connect as Request
 
-
 def dnsUse(payload, expression):
     """
     Retrieve the output of a SQL query taking advantage of the DNS
@@ -84,7 +83,7 @@ def dnsUse(payload, expression):
                 _ = conf.dnsServer.pop(prefix, suffix)
 
                 if _:
-                    _ = extractRegexResult("%s\.(?P<result>.+)\.%s" % (prefix, suffix), _, re.I)
+                    _ = extractRegexResult(r"%s\.(?P<result>.+)\.%s" % (prefix, suffix), _, re.I)
                     _ = decodeHexValue(_)
                     output = (output or "") + _
                     offset += len(_)

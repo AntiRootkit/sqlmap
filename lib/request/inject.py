@@ -33,6 +33,7 @@ from lib.core.data import conf
 from lib.core.data import kb
 from lib.core.data import logger
 from lib.core.data import queries
+from lib.core.decorators import stackedmethod
 from lib.core.dicts import FROM_DUMMY_TABLE
 from lib.core.enums import CHARSET_TYPE
 from lib.core.enums import DBMS
@@ -75,6 +76,9 @@ def _goInference(payload, expression, charsetType=None, firstChar=None, lastChar
     count = 0
 
     value = _goDns(payload, expression)
+
+    if payload is None:
+        return None
 
     if value is not None:
         return value
@@ -333,6 +337,7 @@ def _goUnion(expression, unpack=True, dump=False):
 
     return output
 
+@stackedmethod
 def getValue(expression, blind=True, union=True, error=True, time=True, fromUser=False, expected=None, batch=False, unpack=True, resumeValue=True, charsetType=None, firstChar=None, lastChar=None, dump=False, suppressOutput=None, expectingNone=False, safeCharEncode=True):
     """
     Called each time sqlmap inject a SQL query on the SQL injection
@@ -435,7 +440,8 @@ def getValue(expression, blind=True, union=True, error=True, time=True, fromUser
                 found = (value is not None) or (value is None and expectingNone) or count >= MAX_TECHNIQUES_PER_VALUE
 
             if time and (isTechniqueAvailable(PAYLOAD.TECHNIQUE.TIME) or isTechniqueAvailable(PAYLOAD.TECHNIQUE.STACKED)) and not found:
-                kb.responseTimeMode = re.sub(r"(?i)[^a-z]", "", re.sub(r"'[^']+'", "", re.sub(r"(?i)(\w+)\(.+\)", r"\g<1>", expression))) if re.search(r"(?i)SELECT.+FROM", expression) else None
+                match = re.search(r"\bFROM\b ([^ ]+).+ORDER BY ([^ ]+)", expression)
+                kb.responseTimeMode = "%s|%s" % (match.group(1), match.group(2)) if match else None
 
                 if isTechniqueAvailable(PAYLOAD.TECHNIQUE.TIME):
                     kb.technique = PAYLOAD.TECHNIQUE.TIME

@@ -253,13 +253,13 @@ def cmdLineParser(argv=None):
                              help="Regexp to exclude parameters from testing (e.g. \"ses\")")
 
         injection.add_option("--dbms", dest="dbms",
-                             help="Force back-end DBMS to this value")
+                             help="Force back-end DBMS to provided value")
 
         injection.add_option("--dbms-cred", dest="dbmsCred",
                              help="DBMS authentication credentials (user:password)")
 
         injection.add_option("--os", dest="os",
-                             help="Force back-end DBMS operating system to this value")
+                             help="Force back-end DBMS operating system to provided value")
 
         injection.add_option("--invalid-bignum", dest="invalidBignum", action="store_true",
                              help="Use big numbers for invalidating values")
@@ -333,8 +333,11 @@ def cmdLineParser(argv=None):
         techniques.add_option("--dns-domain", dest="dnsDomain",
                               help="Domain name used for DNS exfiltration attack")
 
-        techniques.add_option("--second-order", dest="secondOrder",
+        techniques.add_option("--second-url", dest="secondUrl",
                               help="Resulting page URL searched for second-order response")
+
+        techniques.add_option("--second-req", dest="secondReq",
+                              help="Load second-order HTTP request from file")
 
         # Fingerprint options
         fingerprint = OptionGroup(parser, "Fingerprint")
@@ -400,7 +403,7 @@ def cmdLineParser(argv=None):
                                help="Search column(s), table(s) and/or database name(s)")
 
         enumeration.add_option("--comments", dest="getComments", action="store_true",
-                               help="Retrieve DBMS comments")
+                               help="Check for DBMS comments during enumeration")
 
         enumeration.add_option("-D", dest="db",
                                help="DBMS database to enumerate")
@@ -581,7 +584,7 @@ def cmdLineParser(argv=None):
                            help="Log all HTTP traffic into a HAR file")
 
         general.add_option("--hex", dest="hexConvert", action="store_true",
-                           help="Use DBMS hex function(s) for data retrieval")
+                           help="Use hex conversion during data retrieval")
 
         general.add_option("--output-dir", dest="outputDir", action="store",
                            help="Custom output directory path")
@@ -634,14 +637,17 @@ def cmdLineParser(argv=None):
         miscellaneous.add_option("--identify-waf", dest="identifyWaf", action="store_true",
                                  help="Make a thorough testing for a WAF/IPS/IDS protection")
 
+        miscellaneous.add_option("--list-tampers", dest="listTampers", action="store_true",
+                                 help="Display list of available tamper scripts")
+
         miscellaneous.add_option("--mobile", dest="mobile", action="store_true",
                                  help="Imitate smartphone through HTTP User-Agent header")
 
         miscellaneous.add_option("--offline", dest="offline", action="store_true",
                                  help="Work in offline mode (only use session data)")
 
-        miscellaneous.add_option("--purge-output", dest="purgeOutput", action="store_true",
-                                 help="Safely remove all content from output directory")
+        miscellaneous.add_option("--purge", dest="purge", action="store_true",
+                                 help="Safely remove all content from sqlmap data directory")
 
         miscellaneous.add_option("--skip-waf", dest="skipWaf", action="store_true",
                                  help="Skip heuristic detection of WAF/IPS/IDS protection")
@@ -681,6 +687,9 @@ def cmdLineParser(argv=None):
                           help=SUPPRESS_HELP)
 
         parser.add_option("--force-dns", dest="forceDns", action="store_true",
+                          help=SUPPRESS_HELP)
+
+        parser.add_option("--force-pivoting", dest="forcePivoting", action="store_true",
                           help=SUPPRESS_HELP)
 
         parser.add_option("--force-threads", dest="forceThreads", action="store_true",
@@ -868,9 +877,9 @@ def cmdLineParser(argv=None):
         if args.dummy:
             args.url = args.url or DUMMY_URL
 
-        if not any((args.direct, args.url, args.logFile, args.bulkFile, args.googleDork, args.configFile, args.requestFile, args.updateAll, args.smokeTest, args.liveTest, args.wizard, args.dependencies, args.purgeOutput, args.sitemapUrl)):
-            errMsg = "missing a mandatory option (-d, -u, -l, -m, -r, -g, -c, -x, --wizard, --update, --purge-output or --dependencies), "
-            errMsg += "use -h for basic or -hh for advanced help\n"
+        if not any((args.direct, args.url, args.logFile, args.bulkFile, args.googleDork, args.configFile, args.requestFile, args.updateAll, args.smokeTest, args.liveTest, args.wizard, args.dependencies, args.purge, args.sitemapUrl, args.listTampers)):
+            errMsg = "missing a mandatory option (-d, -u, -l, -m, -r, -g, -c, -x, --list-tampers, --wizard, --update, --purge or --dependencies). "
+            errMsg += "Use -h for basic and -hh for advanced help\n"
             parser.error(errMsg)
 
         return args

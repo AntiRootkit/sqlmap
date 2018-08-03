@@ -33,9 +33,10 @@ from lib.core.data import paths
 from lib.core.data import logger
 from lib.core.datatype import AttribDict
 from lib.core.defaults import _defaults
+from lib.core.dicts import PART_RUN_CONTENT_TYPES
+from lib.core.enums import AUTOCOMPLETE_TYPE
 from lib.core.enums import CONTENT_STATUS
 from lib.core.enums import MKSTEMP_PREFIX
-from lib.core.enums import PART_RUN_CONTENT_TYPES
 from lib.core.exception import SqlmapConnectionException
 from lib.core.log import LOGGER_HANDLER
 from lib.core.optiondict import optDict
@@ -43,6 +44,7 @@ from lib.core.settings import RESTAPI_DEFAULT_ADAPTER
 from lib.core.settings import IS_WIN
 from lib.core.settings import RESTAPI_DEFAULT_ADDRESS
 from lib.core.settings import RESTAPI_DEFAULT_PORT
+from lib.core.shell import autoCompletion
 from lib.core.subprocessng import Popen
 from lib.parse.cmdline import cmdLineParser
 from thirdparty.bottle.bottle import error as return_error
@@ -104,9 +106,7 @@ class Database(object):
 
     def init(self):
         self.execute("CREATE TABLE logs(id INTEGER PRIMARY KEY AUTOINCREMENT, taskid INTEGER, time TEXT, level TEXT, message TEXT)")
-
         self.execute("CREATE TABLE data(id INTEGER PRIMARY KEY AUTOINCREMENT, taskid INTEGER, status INTEGER, content_type INTEGER, value TEXT)")
-
         self.execute("CREATE TABLE errors(id INTEGER PRIMARY KEY AUTOINCREMENT, taskid INTEGER, error TEXT)")
 
 class Task(object):
@@ -161,6 +161,8 @@ class Task(object):
             self.process = Popen(["python", "sqlmap.py", "--api", "-c", configFile], shell=False, close_fds=not IS_WIN)
         elif os.path.exists(os.path.join(os.getcwd(), "sqlmap.py")):
             self.process = Popen(["python", "sqlmap.py", "--api", "-c", configFile], shell=False, cwd=os.getcwd(), close_fds=not IS_WIN)
+        elif os.path.exists(os.path.join(os.path.abspath(os.path.dirname(sys.argv[0])), "sqlmap.py")):
+            self.process = Popen(["python", "sqlmap.py", "--api", "-c", configFile], shell=False, cwd=os.path.join(os.path.abspath(os.path.dirname(sys.argv[0]))), close_fds=not IS_WIN)
         else:
             self.process = Popen(["sqlmap", "--api", "-c", configFile], shell=False, close_fds=not IS_WIN)
 
@@ -198,7 +200,6 @@ class Task(object):
 
     def engine_has_terminated(self):
         return isinstance(self.engine_get_returncode(), int)
-
 
 # Wrapper functions for sqlmap engine
 class StdDbOut(object):
@@ -499,9 +500,7 @@ def scan_stop(taskid):
     Stop a scan
     """
 
-    if (taskid not in DataStore.tasks or
-            DataStore.tasks[taskid].engine_process() is None or
-            DataStore.tasks[taskid].engine_has_terminated()):
+    if (taskid not in DataStore.tasks or DataStore.tasks[taskid].engine_process() is None or DataStore.tasks[taskid].engine_has_terminated()):
         logger.warning("[%s] Invalid task ID provided to scan_stop()" % taskid)
         return jsonize({"success": False, "message": "Invalid task ID"})
 
@@ -516,9 +515,7 @@ def scan_kill(taskid):
     Kill a scan
     """
 
-    if (taskid not in DataStore.tasks or
-            DataStore.tasks[taskid].engine_process() is None or
-            DataStore.tasks[taskid].engine_has_terminated()):
+    if (taskid not in DataStore.tasks or DataStore.tasks[taskid].engine_process() is None or DataStore.tasks[taskid].engine_has_terminated()):
         logger.warning("[%s] Invalid task ID provided to scan_kill()" % taskid)
         return jsonize({"success": False, "message": "Invalid task ID"})
 
@@ -573,7 +570,6 @@ def scan_data(taskid):
     logger.debug("[%s] Retrieved scan data and error messages" % taskid)
     return jsonize({"success": True, "data": json_data_message, "error": json_errors_message})
 
-
 # Functions to handle scans' logs
 @get("/scan/<taskid>/log/<start>/<end>")
 def scan_log_limited(taskid, start, end):
@@ -601,7 +597,6 @@ def scan_log_limited(taskid, start, end):
     logger.debug("[%s] Retrieved scan log messages subset" % taskid)
     return jsonize({"success": True, "log": json_log_messages})
 
-
 @get("/scan/<taskid>/log")
 def scan_log(taskid):
     """
@@ -620,7 +615,6 @@ def scan_log(taskid):
 
     logger.debug("[%s] Retrieved scan log messages" % taskid)
     return jsonize({"success": True, "log": json_log_messages})
-
 
 # Function to handle files inside the output directory
 @get("/download/<taskid>/<target>/<filename:path>")
@@ -647,7 +641,6 @@ def download(taskid, target, filename):
     else:
         logger.warning("[%s] File does not exist %s" % (taskid, target))
         return jsonize({"success": False, "message": "File does not exist"})
-
 
 def server(host=RESTAPI_DEFAULT_ADDRESS, port=RESTAPI_DEFAULT_PORT, adapter=RESTAPI_DEFAULT_ADAPTER, username=None, password=None):
     """
@@ -696,7 +689,7 @@ def server(host=RESTAPI_DEFAULT_ADDRESS, port=RESTAPI_DEFAULT_PORT, adapter=REST
     except ImportError:
         if adapter.lower() not in server_names:
             errMsg = "Adapter '%s' is unknown. " % adapter
-            errMsg += "(Note: available adapters '%s')" % ', '.join(sorted(server_names.keys()))
+            errMsg += "List of supported adapters: %s" % ', '.join(sorted(server_names.keys()))
         else:
             errMsg = "Server support for adapter '%s' is not installed on this system " % adapter
             errMsg += "(Note: you can try to install it with 'sudo apt-get install python-%s' or 'sudo pip install %s')" % (adapter, adapter)
@@ -749,6 +742,9 @@ def client(host=RESTAPI_DEFAULT_ADDRESS, port=RESTAPI_DEFAULT_PORT, username=Non
             errMsg += "(%s)" % ex
             logger.critical(errMsg)
             return
+
+    commands = ("help", "new", "use", "data", "log", "status", "option", "stop", "kill", "list", "flush", "exit", "bye", "quit")
+    autoCompletion(AUTOCOMPLETE_TYPE.API, commands=commands)
 
     taskid = None
     logger.info("Type 'help' or '?' for list of available commands")

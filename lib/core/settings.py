@@ -19,7 +19,7 @@ from lib.core.enums import DBMS_DIRECTORY_NAME
 from lib.core.enums import OS
 
 # sqlmap version (<major>.<minor>.<month>.<monthly commit>)
-VERSION = "1.2.3.34"
+VERSION = "1.2.7.28"
 TYPE = "dev" if VERSION.count('.') > 2 and VERSION.split('.')[-1] != '0' else "stable"
 TYPE_COLORS = {"dev": 33, "stable": 90, "pip": 34}
 VERSION_STRING = "sqlmap/%s#%s" % ('.'.join(VERSION.split('.')[:-1]) if VERSION.count('.') > 2 and VERSION.split('.')[-1] == '0' else VERSION, TYPE)
@@ -225,7 +225,7 @@ PYVERSION = sys.version.split()[0]
 MSSQL_SYSTEM_DBS = ("Northwind", "master", "model", "msdb", "pubs", "tempdb")
 MYSQL_SYSTEM_DBS = ("information_schema", "mysql", "performance_schema")
 PGSQL_SYSTEM_DBS = ("information_schema", "pg_catalog", "pg_toast", "pgagent")
-ORACLE_SYSTEM_DBS = ("ANONYMOUS", "APEX_PUBLIC_USER", "CTXSYS", "DBSNMP", "DIP", "EXFSYS", "FLOWS_%", "FLOWS_FILES", "LBACSYS", "MDDATA", "MDSYS", "MGMT_VIEW", "OLAPSYS", "ORACLE_OCM", "ORDDATA", "ORDPLUGINS", "ORDSYS", "OUTLN", "OWBSYS", "SI_INFORMTN_SCHEMA", "SPATIAL_CSW_ADMIN_USR", "SPATIAL_WFS_ADMIN_USR", "SYS", "SYSMAN", "SYSTEM", "WKPROXY", "WKSYS", "WK_TEST", "WMSYS", "XDB", "XS$NULL")  # Reference: https://blog.vishalgupta.com/2011/06/19/predefined-oracle-system-schemas/
+ORACLE_SYSTEM_DBS = ('ANONYMOUS', 'APEX_030200', 'APEX_PUBLIC_USER', 'APPQOSSYS', 'BI', 'CTXSYS', 'DBSNMP', 'DIP', 'EXFSYS', 'FLOWS_%', 'FLOWS_FILES', 'HR', 'IX', 'LBACSYS', 'MDDATA', 'MDSYS', 'MGMT_VIEW', 'OC', 'OE', 'OLAPSYS', 'ORACLE_OCM', 'ORDDATA', 'ORDPLUGINS', 'ORDSYS', 'OUTLN', 'OWBSYS', 'PM', 'SCOTT', 'SH', 'SI_INFORMTN_SCHEMA', 'SPATIAL_CSW_ADMIN_USR', 'SPATIAL_WFS_ADMIN_USR', 'SYS', 'SYSMAN', 'SYSTEM', 'WKPROXY', 'WKSYS', 'WK_TEST', 'WMSYS', 'XDB', 'XS$NULL')
 SQLITE_SYSTEM_DBS = ("sqlite_master", "sqlite_temp_master")
 ACCESS_SYSTEM_DBS = ("MSysAccessObjects", "MSysACEs", "MSysObjects", "MSysQueries", "MSysRelationships", "MSysAccessStorage", "MSysAccessXML", "MSysModules", "MSysModules2")
 FIREBIRD_SYSTEM_DBS = ("RDB$BACKUP_HISTORY", "RDB$CHARACTER_SETS", "RDB$CHECK_CONSTRAINTS", "RDB$COLLATIONS", "RDB$DATABASE", "RDB$DEPENDENCIES", "RDB$EXCEPTIONS", "RDB$FIELDS", "RDB$FIELD_DIMENSIONS", " RDB$FILES", "RDB$FILTERS", "RDB$FORMATS", "RDB$FUNCTIONS", "RDB$FUNCTION_ARGUMENTS", "RDB$GENERATORS", "RDB$INDEX_SEGMENTS", "RDB$INDICES", "RDB$LOG_FILES", "RDB$PAGES", "RDB$PROCEDURES", "RDB$PROCEDURE_PARAMETERS", "RDB$REF_CONSTRAINTS", "RDB$RELATIONS", "RDB$RELATION_CONSTRAINTS", "RDB$RELATION_FIELDS", "RDB$ROLES", "RDB$SECURITY_CLASSES", "RDB$TRANSACTIONS", "RDB$TRIGGERS", "RDB$TRIGGER_MESSAGES", "RDB$TYPES", "RDB$USER_PRIVILEGES", "RDB$VIEW_RELATIONS")
@@ -364,10 +364,10 @@ URI_HTTP_HEADER = "URI"
 URI_INJECTABLE_REGEX = r"//[^/]*/([^\.*?]+)\Z"
 
 # Regex used for masking sensitive data
-SENSITIVE_DATA_REGEX = "(\s|=)(?P<result>[^\s=]*%s[^\s]*)\s"
+SENSITIVE_DATA_REGEX = r"(\s|=)(?P<result>[^\s=]*%s[^\s]*)\s"
 
 # Options to explicitly mask in anonymous (unhandled exception) reports (along with anything carrying the <hostname> inside)
-SENSITIVE_OPTIONS = ("hostname", "data", "dnsDomain", "googleDork", "authCred", "proxyCred", "tbl", "db", "col", "user", "cookie", "proxy", "rFile", "wFile", "dFile", "testParameter", "authCred")
+SENSITIVE_OPTIONS = ("hostname", "answers", "data", "dnsDomain", "googleDork", "authCred", "proxyCred", "tbl", "db", "col", "user", "cookie", "proxy", "rFile", "wFile", "dFile", "testParameter", "authCred")
 
 # Maximum number of threads (avoiding connection issues and/or DoS)
 MAX_NUMBER_OF_THREADS = 10
@@ -388,7 +388,7 @@ CANDIDATE_SENTENCE_MIN_LENGTH = 10
 CUSTOM_INJECTION_MARK_CHAR = '*'
 
 # Other way to declare injection position
-INJECT_HERE_REGEX = '(?i)%INJECT[_ ]?HERE%'
+INJECT_HERE_REGEX = r"(?i)%INJECT[_ ]?HERE%"
 
 # Minimum chunk length used for retrieving data over error based payloads
 MIN_ERROR_CHUNK_LENGTH = 8
@@ -487,7 +487,7 @@ LEGAL_DISCLAIMER = "Usage of sqlmap for attacking targets without prior mutual c
 REFLECTIVE_MISS_THRESHOLD = 20
 
 # Regular expression used for extracting HTML title
-HTML_TITLE_REGEX = "<title>(?P<result>[^<]+)</title>"
+HTML_TITLE_REGEX = r"<title>(?P<result>[^<]+)</title>"
 
 # Table used for Base64 conversion in WordPress hash cracking routine
 ITOA64 = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
@@ -598,7 +598,7 @@ HASHDB_RETRIEVE_RETRIES = 3
 HASHDB_END_TRANSACTION_RETRIES = 3
 
 # Unique milestone value used for forced deprecation of old HashDB values (e.g. when changing hash/pickle mechanism)
-HASHDB_MILESTONE_VALUE = "dPHoJRQYvs"  # python -c 'import random, string; print "".join(random.sample(string.ascii_letters, 10))'
+HASHDB_MILESTONE_VALUE = "BZzRotigLX"  # python -c 'import random, string; print "".join(random.sample(string.ascii_letters, 10))'
 
 # Warn user of possible delay due to large page dump in full UNION query injections
 LARGE_OUTPUT_THRESHOLD = 1024 ** 2
@@ -631,7 +631,7 @@ BANNER = re.sub(r"\[.\]", lambda _: "[\033[01;41m%s\033[01;49m]" % random.sample
 DUMMY_NON_SQLI_CHECK_APPENDIX = "<'\">"
 
 # Regular expression used for recognition of file inclusion errors
-FI_ERROR_REGEX = "(?i)[^\n]{0,100}(no such file|failed (to )?open)[^\n]{0,100}"
+FI_ERROR_REGEX = r"(?i)[^\n]{0,100}(no such file|failed (to )?open)[^\n]{0,100}"
 
 # Length of prefix and suffix used in non-SQLI heuristic checks
 NON_SQLI_CHECK_PREFIX_SUFFIX_LENGTH = 6
@@ -640,7 +640,7 @@ NON_SQLI_CHECK_PREFIX_SUFFIX_LENGTH = 6
 MAX_CONNECTION_CHUNK_SIZE = 10 * 1024 * 1024
 
 # Maximum response total page size (trimmed if larger)
-MAX_CONNECTION_TOTAL_SIZE = 50 * 1024 * 1024
+MAX_CONNECTION_TOTAL_SIZE = 100 * 1024 * 1024
 
 # For preventing MemoryError exceptions (caused when using large sequences in difflib.SequenceMatcher)
 MAX_DIFFLIB_SEQUENCE_LENGTH = 10 * 1024 * 1024

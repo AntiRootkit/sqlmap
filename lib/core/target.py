@@ -83,6 +83,7 @@ def _setRequestParams():
         conf.parameters[None] = "direct connection"
         return
 
+    hintNames = []
     testableParameters = False
 
     # Perform checks on GET parameters
@@ -101,7 +102,6 @@ def _setRequestParams():
 
     if conf.data is not None:
         conf.method = HTTPMETHOD.POST if not conf.method or conf.method == HTTPMETHOD.GET else conf.method
-        hintNames = []
 
         def process(match, repl):
             retVal = match.group(0)
@@ -142,14 +142,14 @@ def _setRequestParams():
                 if not (kb.processUserMarks and kb.customInjectionMark in conf.data):
                     conf.data = getattr(conf.data, UNENCODED_ORIGINAL_VALUE, conf.data)
                     conf.data = conf.data.replace(kb.customInjectionMark, ASTERISK_MARKER)
-                    conf.data = re.sub(r'("(?P<name>[^"]+)"\s*:\s*"[^"]*)"', functools.partial(process, repl=r'\g<1>%s"' % kb.customInjectionMark), conf.data)
+                    conf.data = re.sub(r'("(?P<name>[^"]+)"\s*:\s*".+?)"(?<!\\")', functools.partial(process, repl=r'\g<1>%s"' % kb.customInjectionMark), conf.data)
                     conf.data = re.sub(r'("(?P<name>[^"]+)"\s*:\s*)(-?\d[\d\.]*)\b', functools.partial(process, repl=r'\g<1>\g<3>%s' % kb.customInjectionMark), conf.data)
                     conf.data = re.sub(r'("(?P<name>[^"]+)"\s*:\s*)((true|false|null))\b', functools.partial(process, repl=r'\g<1>\g<3>%s' % kb.customInjectionMark), conf.data)
                     match = re.search(r'(?P<name>[^"]+)"\s*:\s*\[([^\]]+)\]', conf.data)
                     if match and not (conf.testParameter and match.group("name") not in conf.testParameter):
                         _ = match.group(2)
-                        _ = re.sub(r'("[^"]+)"', '\g<1>%s"' % kb.customInjectionMark, _)
-                        _ = re.sub(r'(\A|,|\s+)(-?\d[\d\.]*\b)', '\g<0>%s' % kb.customInjectionMark, _)
+                        _ = re.sub(r'("[^"]+)"', r'\g<1>%s"' % kb.customInjectionMark, _)
+                        _ = re.sub(r'(\A|,|\s+)(-?\d[\d\.]*\b)', r'\g<0>%s' % kb.customInjectionMark, _)
                         conf.data = conf.data.replace(match.group(0), match.group(0).replace(match.group(2), _))
 
                 kb.postHint = POST_HINT.JSON
@@ -230,7 +230,7 @@ def _setRequestParams():
             if kb.customInjectionMark not in conf.data:  # in case that no usable parameter values has been found
                 conf.parameters[PLACE.POST] = conf.data
 
-    kb.processUserMarks = True if (kb.postHint and kb.customInjectionMark in conf.data) else kb.processUserMarks
+    kb.processUserMarks = True if (kb.postHint and kb.customInjectionMark in (conf.data or "")) else kb.processUserMarks
 
     if re.search(URI_INJECTABLE_REGEX, conf.url, re.I) and not any(place in conf.parameters for place in (PLACE.GET, PLACE.POST)) and not kb.postHint and kb.customInjectionMark not in (conf.data or "") and conf.url.startswith("http"):
         warnMsg = "you've provided target URL without any GET "
@@ -619,33 +619,35 @@ def _createTargetDirs():
     Create the output directory.
     """
 
-    try:
-        if not os.path.isdir(paths.SQLMAP_OUTPUT_PATH):
-            os.makedirs(paths.SQLMAP_OUTPUT_PATH)
-
-        _ = os.path.join(paths.SQLMAP_OUTPUT_PATH, randomStr())
-        open(_, "w+b").close()
-        os.remove(_)
-
-        if conf.outputDir:
-            warnMsg = "using '%s' as the output directory" % paths.SQLMAP_OUTPUT_PATH
-            logger.warn(warnMsg)
-    except (OSError, IOError), ex:
+    for context in "output", "history":
+        directory = paths["SQLMAP_%s_PATH" % context.upper()]
         try:
-            tempDir = tempfile.mkdtemp(prefix="sqlmapoutput")
-        except Exception, _:
-            errMsg = "unable to write to the temporary directory ('%s'). " % _
-            errMsg += "Please make sure that your disk is not full and "
-            errMsg += "that you have sufficient write permissions to "
-            errMsg += "create temporary files and/or directories"
-            raise SqlmapSystemException(errMsg)
+            if not os.path.isdir(directory):
+                os.makedirs(directory)
 
-        warnMsg = "unable to %s output directory " % ("create" if not os.path.isdir(paths.SQLMAP_OUTPUT_PATH) else "write to the")
-        warnMsg += "'%s' (%s). " % (paths.SQLMAP_OUTPUT_PATH, getUnicode(ex))
-        warnMsg += "Using temporary directory '%s' instead" % getUnicode(tempDir)
-        logger.warn(warnMsg)
+            _ = os.path.join(directory, randomStr())
+            open(_, "w+b").close()
+            os.remove(_)
 
-        paths.SQLMAP_OUTPUT_PATH = tempDir
+            if conf.outputDir and context == "output":
+                warnMsg = "using '%s' as the %s directory" % (directory, context)
+                logger.warn(warnMsg)
+        except (OSError, IOError), ex:
+            try:
+                tempDir = tempfile.mkdtemp(prefix="sqlmap%s" % context)
+            except Exception, _:
+                errMsg = "unable to write to the temporary directory ('%s'). " % _
+                errMsg += "Please make sure that your disk is not full and "
+                errMsg += "that you have sufficient write permissions to "
+                errMsg += "create temporary files and/or directories"
+                raise SqlmapSystemException(errMsg)
+
+            warnMsg = "unable to %s %s directory " % ("create" if not os.path.isdir(directory) else "write to the", context)
+            warnMsg += "'%s' (%s). " % (directory, getUnicode(ex))
+            warnMsg += "Using temporary directory '%s' instead" % getUnicode(tempDir)
+            logger.warn(warnMsg)
+
+            paths["SQLMAP_%s_PATH" % context.upper()] = tempDir
 
     conf.outputPath = os.path.join(getUnicode(paths.SQLMAP_OUTPUT_PATH), normalizeUnicode(getUnicode(conf.hostname)))
 
@@ -668,6 +670,8 @@ def _createTargetDirs():
         logger.warn(warnMsg)
 
         conf.outputPath = tempDir
+
+    conf.outputPath = getUnicode(conf.outputPath)
 
     try:
         with codecs.open(os.path.join(conf.outputPath, "target.txt"), "w+", UNICODE_ENCODING) as f:
