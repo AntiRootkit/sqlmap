@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2018 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2019 sqlmap developers (http://sqlmap.org/)
 See the file 'LICENSE' for copying permission
 """
+
+from __future__ import print_function
 
 import re
 import time
@@ -15,6 +17,7 @@ from lib.core.common import calculateDeltaSeconds
 from lib.core.common import cleanQuery
 from lib.core.common import expandAsteriskForColumns
 from lib.core.common import extractExpectedValue
+from lib.core.common import filterNone
 from lib.core.common import getPublicTypeMembers
 from lib.core.common import getTechniqueData
 from lib.core.common import hashDBRetrieve
@@ -29,6 +32,7 @@ from lib.core.common import pushValue
 from lib.core.common import randomStr
 from lib.core.common import readInput
 from lib.core.common import singleTimeWarnMessage
+from lib.core.compat import xrange
 from lib.core.data import conf
 from lib.core.data import kb
 from lib.core.data import logger
@@ -57,6 +61,7 @@ from lib.techniques.dns.test import dnsTest
 from lib.techniques.dns.use import dnsUse
 from lib.techniques.error.use import errorUse
 from lib.techniques.union.use import unionUse
+from thirdparty import six
 
 def _goDns(payload, expression):
     value = None
@@ -85,8 +90,15 @@ def _goInference(payload, expression, charsetType=None, firstChar=None, lastChar
 
     timeBasedCompare = (kb.technique in (PAYLOAD.TECHNIQUE.TIME, PAYLOAD.TECHNIQUE.STACKED))
 
+    if timeBasedCompare and conf.threads > 1 and kb.forceThreads is None:
+        msg = "multi-threading is considered unsafe in "
+        msg += "time-based data retrieval. Are you sure "
+        msg += "of your choice (breaking warranty) [y/N] "
+
+        kb.forceThreads = readInput(msg, default='N', boolean=True)
+
     if not (timeBasedCompare and kb.dnsTest):
-        if (conf.eta or conf.threads > 1) and Backend.getIdentifiedDbms() and not re.search(r"(COUNT|LTRIM)\(", expression, re.I) and not (timeBasedCompare and not conf.forceThreads):
+        if (conf.eta or conf.threads > 1) and Backend.getIdentifiedDbms() and not re.search(r"(COUNT|LTRIM)\(", expression, re.I) and not (timeBasedCompare and not kb.forceThreads):
 
             if field and re.search(r"\ASELECT\s+DISTINCT\((.+?)\)\s+FROM", expression, re.I):
                 expression = "SELECT %s FROM (%s)" % (field, expression)
@@ -277,7 +289,7 @@ def _goInferenceProxy(expression, fromUser=False, batch=False, unpack=True, char
                         raise SqlmapDataException(errMsg)
 
                 except KeyboardInterrupt:
-                    print
+                    print()
                     warnMsg = "user aborted during dumping phase"
                     logger.warn(warnMsg)
 
@@ -332,7 +344,7 @@ def _goUnion(expression, unpack=True, dump=False):
 
     output = unionUse(expression, unpack=unpack, dump=dump)
 
-    if isinstance(output, basestring):
+    if isinstance(output, six.string_types):
         output = parseUnionPage(output)
 
     return output
@@ -344,8 +356,13 @@ def getValue(expression, blind=True, union=True, error=True, time=True, fromUser
     affected parameter.
     """
 
-    if conf.hexConvert:
-        charsetType = CHARSET_TYPE.HEXADECIMAL
+    if conf.hexConvert and expected != EXPECTED.BOOL and Backend.getIdentifiedDbms():
+        if not hasattr(queries[Backend.getIdentifiedDbms()], "hex"):
+            warnMsg = "switch '--hex' is currently not supported on DBMS %s" % Backend.getIdentifiedDbms()
+            singleTimeWarnMessage(warnMsg)
+            conf.hexConvert = False
+        else:
+            charsetType = CHARSET_TYPE.HEXADECIMAL
 
     kb.safeCharEncode = safeCharEncode
     kb.resumeValues = resumeValue
@@ -422,7 +439,7 @@ def getValue(expression, blind=True, union=True, error=True, time=True, fromUser
                     found = (value is not None) or (value is None and expectingNone) or count >= MAX_TECHNIQUES_PER_VALUE
 
                 if found and conf.dnsDomain:
-                    _ = "".join(filter(None, (key if isTechniqueAvailable(value) else None for key, value in {'E': PAYLOAD.TECHNIQUE.ERROR, 'Q': PAYLOAD.TECHNIQUE.QUERY, 'U': PAYLOAD.TECHNIQUE.UNION}.items())))
+                    _ = "".join(filterNone(key if isTechniqueAvailable(value) else None for key, value in {'E': PAYLOAD.TECHNIQUE.ERROR, 'Q': PAYLOAD.TECHNIQUE.QUERY, 'U': PAYLOAD.TECHNIQUE.UNION}.items()))
                     warnMsg = "option '--dns-domain' will be ignored "
                     warnMsg += "as faster techniques are usable "
                     warnMsg += "(%s) " % _
@@ -476,7 +493,7 @@ def getValue(expression, blind=True, union=True, error=True, time=True, fromUser
         singleTimeWarnMessage(warnMsg)
 
     # Dirty patch (safe-encoded unicode characters)
-    if isinstance(value, unicode) and "\\x" in value:
+    if isinstance(value, six.text_type) and "\\x" in value:
         try:
             candidate = eval(repr(value).replace("\\\\x", "\\x").replace("u'", "'", 1)).decode(conf.encoding or UNICODE_ENCODING)
             if "\\x" not in candidate:

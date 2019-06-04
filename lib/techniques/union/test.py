@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2018 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2019 sqlmap developers (http://sqlmap.org/)
 See the file 'LICENSE' for copying permission
 """
 
@@ -24,6 +24,7 @@ from lib.core.common import singleTimeLogMessage
 from lib.core.common import singleTimeWarnMessage
 from lib.core.common import stdev
 from lib.core.common import wasLastResponseDBMSError
+from lib.core.compat import xrange
 from lib.core.data import conf
 from lib.core.data import kb
 from lib.core.data import logger
@@ -56,7 +57,7 @@ def _findUnionCharCount(comment, place, parameter, value, prefix, suffix, where=
             query = agent.suffixQuery(query, suffix=suffix, comment=comment)
             payload = agent.payload(newValue=query, place=place, parameter=parameter, where=where)
             page, headers, code = Request.queryPage(payload, place=place, content=True, raise404=False)
-            return not any(re.search(_, page or "", re.I) and not re.search(_, kb.pageTemplate or "", re.I) for _ in ("(warning|error):", "order by", "unknown column", "failed")) and not kb.heavilyDynamic and comparison(page, headers, code) or re.search(r"data types cannot be compared or sorted", page or "", re.I) is not None
+            return not any(re.search(_, page or "", re.I) and not re.search(_, kb.pageTemplate or "", re.I) for _ in ("(warning|error):", "order (by|clause)", "unknown column", "failed")) and not kb.heavilyDynamic and comparison(page, headers, code) or re.search(r"data types cannot be compared or sorted", page or "", re.I) is not None
 
         if _orderByTest(1 if lowerCount is None else lowerCount) and not _orderByTest(randomInt() if upperCount is None else upperCount + 1):
             infoMsg = "'ORDER BY' technique appears to be usable. "
@@ -74,7 +75,7 @@ def _findUnionCharCount(comment, place, parameter, value, prefix, suffix, where=
                     highCols += ORDER_BY_STEP
                 else:
                     while not found:
-                        mid = highCols - (highCols - lowCols) / 2
+                        mid = highCols - (highCols - lowCols) // 2
                         if _orderByTest(mid):
                             lowCols = mid
                         else:
@@ -90,13 +91,15 @@ def _findUnionCharCount(comment, place, parameter, value, prefix, suffix, where=
         kb.errorIsNone = False
         lowerCount, upperCount = conf.uColsStart, conf.uColsStop
 
-        if kb.orderByColumns is None and (lowerCount == 1 or conf.uCols):  # ORDER BY is not bullet-proof
+        if kb.orderByColumns is None and (lowerCount == 1 or conf.uCols):  # Note: ORDER BY is not bullet-proof
             found = _orderByTechnique(lowerCount, upperCount) if conf.uCols else _orderByTechnique()
             if found:
                 kb.orderByColumns = found
                 infoMsg = "target URL appears to have %d column%s in query" % (found, 's' if found > 1 else "")
                 singleTimeLogMessage(infoMsg)
                 return found
+            elif kb.futileUnion:
+                return None
 
         if abs(upperCount - lowerCount) < MIN_UNION_RESPONSES:
             upperCount = lowerCount + MIN_UNION_RESPONSES
@@ -143,17 +146,17 @@ def _findUnionCharCount(comment, place, parameter, value, prefix, suffix, where=
                 retVal = minItem[0]
 
             elif abs(max_ - min_) >= MIN_STATISTICAL_RANGE:
-                    deviation = stdev(ratios)
+                deviation = stdev(ratios)
 
-                    if deviation is not None:
-                        lower, upper = average(ratios) - UNION_STDEV_COEFF * deviation, average(ratios) + UNION_STDEV_COEFF * deviation
+                if deviation is not None:
+                    lower, upper = average(ratios) - UNION_STDEV_COEFF * deviation, average(ratios) + UNION_STDEV_COEFF * deviation
 
-                        if min_ < lower:
-                            retVal = minItem[0]
+                    if min_ < lower:
+                        retVal = minItem[0]
 
-                        if max_ > upper:
-                            if retVal is None or abs(max_ - upper) > abs(min_ - lower):
-                                retVal = maxItem[0]
+                    if max_ > upper:
+                        if retVal is None or abs(max_ - upper) > abs(min_ - lower):
+                            retVal = maxItem[0]
     finally:
         kb.errorIsNone = popValue()
 
@@ -167,7 +170,7 @@ def _unionPosition(comment, place, parameter, prefix, suffix, count, where=PAYLO
     validPayload = None
     vector = None
 
-    positions = range(0, count)
+    positions = [_ for _ in xrange(0, count)]
 
     # Unbiased approach for searching appropriate usable column
     random.shuffle(positions)
@@ -303,9 +306,9 @@ def _unionTestByCharBruteforce(comment, place, parameter, value, prefix, suffix)
             if not all((validPayload, vector)) and not warnMsg.endswith("consider "):
                 singleTimeWarnMessage(warnMsg)
 
-    if count and orderBy is None and kb.orderByColumns is not None:  # discard ORDER BY results (not usable - e.g. maybe invalid altogether)
-        conf.uChar, kb.uChar = uChars
-        validPayload, vector = _unionTestByCharBruteforce(comment, place, parameter, value, prefix, suffix)
+        if orderBy is None and kb.orderByColumns is not None and not all((validPayload, vector)):  # discard ORDER BY results (not usable - e.g. maybe invalid altogether)
+            conf.uChar, kb.uChar = uChars
+            validPayload, vector = _unionTestByCharBruteforce(comment, place, parameter, value, prefix, suffix)
 
     return validPayload, vector
 
@@ -318,8 +321,24 @@ def unionTest(comment, place, parameter, value, prefix, suffix):
     if conf.direct:
         return
 
+    negativeLogic = kb.negativeLogic
     kb.technique = PAYLOAD.TECHNIQUE.UNION
-    validPayload, vector = _unionTestByCharBruteforce(comment, place, parameter, value, prefix, suffix)
+
+    try:
+        if negativeLogic:
+            pushValue(kb.negativeLogic)
+            pushValue(conf.string)
+            pushValue(conf.code)
+
+            kb.negativeLogic = False
+            conf.string = conf.code = None
+
+        validPayload, vector = _unionTestByCharBruteforce(comment, place, parameter, value, prefix, suffix)
+    finally:
+        if negativeLogic:
+            conf.code = popValue()
+            conf.string = popValue()
+            kb.negativeLogic = popValue()
 
     if validPayload:
         validPayload = agent.removePayloadDelimiters(validPayload)

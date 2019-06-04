@@ -22,7 +22,6 @@
 import os
 import select
 import socket
-import subprocess
 import sys
 
 def setNonBlocking(fd):
@@ -37,7 +36,7 @@ def setNonBlocking(fd):
     fcntl.fcntl(fd, fcntl.F_SETFL, flags)
 
 def main(src, dst):
-    if subprocess.mswindows:
+    if sys.platform == "nt":
         sys.stderr.write('icmpsh master can only run on Posix systems\n')
         sys.exit(255)
 
@@ -128,7 +127,7 @@ def main(src, dst):
                 try:
                     # Send it to the target host
                     sock.sendto(ip.get_packet(), (dst, 0))
-                except socket.error, ex:
+                except socket.error as ex:
                     sys.stderr.write("'%s'\n" % ex)
                     sys.stderr.flush()
 

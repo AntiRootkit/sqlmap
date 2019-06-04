@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2018 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2019 sqlmap developers (http://sqlmap.org/)
 See the file 'LICENSE' for copying permission
 """
 
@@ -21,6 +21,8 @@ warnings.filterwarnings(action="ignore", category=DeprecationWarning)
 from sqlmap import modulePath
 from lib.core.common import setPaths
 from lib.core.data import logger
+from lib.core.patch import dirtyPatches
+from lib.core.patch import resolveCrossReferences
 from lib.core.settings import RESTAPI_DEFAULT_ADAPTER
 from lib.core.settings import RESTAPI_DEFAULT_ADDRESS
 from lib.core.settings import RESTAPI_DEFAULT_PORT
@@ -32,6 +34,9 @@ def main():
     REST-JSON API main function
     """
 
+    dirtyPatches()
+    resolveCrossReferences()
+
     # Set default logging level to debug
     logger.setLevel(logging.DEBUG)
 
@@ -40,8 +45,8 @@ def main():
 
     # Parse command line options
     apiparser = optparse.OptionParser()
-    apiparser.add_option("-s", "--server", help="Act as a REST-JSON API server", default=RESTAPI_DEFAULT_PORT, action="store_true")
-    apiparser.add_option("-c", "--client", help="Act as a REST-JSON API client", default=RESTAPI_DEFAULT_PORT, action="store_true")
+    apiparser.add_option("-s", "--server", help="Run as a REST-JSON API server", default=RESTAPI_DEFAULT_PORT, action="store_true")
+    apiparser.add_option("-c", "--client", help="Run as a REST-JSON API client", default=RESTAPI_DEFAULT_PORT, action="store_true")
     apiparser.add_option("-H", "--host", help="Host of the REST-JSON API server (default \"%s\")" % RESTAPI_DEFAULT_ADDRESS, default=RESTAPI_DEFAULT_ADDRESS, action="store")
     apiparser.add_option("-p", "--port", help="Port of the the REST-JSON API server (default %d)" % RESTAPI_DEFAULT_PORT, default=RESTAPI_DEFAULT_PORT, type="int", action="store")
     apiparser.add_option("--adapter", help="Server (bottle) adapter to use (default \"%s\")" % RESTAPI_DEFAULT_ADAPTER, default=RESTAPI_DEFAULT_ADAPTER, action="store")

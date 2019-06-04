@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2018 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2019 sqlmap developers (http://sqlmap.org/)
 See the file 'LICENSE' for copying permission
 """
 
@@ -22,6 +22,7 @@ from lib.core.settings import MAXDB_ALIASES
 from lib.core.settings import SYBASE_ALIASES
 from lib.core.settings import DB2_ALIASES
 from lib.core.settings import HSQLDB_ALIASES
+from lib.core.settings import H2_ALIASES
 from lib.core.settings import INFORMIX_ALIASES
 
 FIREBIRD_TYPES = {
@@ -195,6 +196,7 @@ DBMS_DICT = {
     DBMS.SYBASE: (SYBASE_ALIASES, "python-pymssql", "https://github.com/pymssql/pymssql", "sybase"),
     DBMS.DB2: (DB2_ALIASES, "python ibm-db", "https://github.com/ibmdb/python-ibmdb", "ibm_db_sa"),
     DBMS.HSQLDB: (HSQLDB_ALIASES, "python jaydebeapi & python-jpype", "https://pypi.python.org/pypi/JayDeBeApi/ & http://jpype.sourceforge.net/", None),
+    DBMS.H2: (H2_ALIASES, None, None, None),
     DBMS.INFORMIX: (INFORMIX_ALIASES, "python ibm-db", "https://github.com/ibmdb/python-ibmdb", "ibm_db_sa"),
 }
 
@@ -263,6 +265,10 @@ SQL_STATEMENTS = {
         "commit ",
         "rollback ",
     ),
+
+    "SQL administration": (
+        "set ",
+    ),
 }
 
 POST_HINT_CONTENT_TYPES = {
@@ -274,7 +280,7 @@ POST_HINT_CONTENT_TYPES = {
     POST_HINT.ARRAY_LIKE: "application/x-www-form-urlencoded; charset=utf-8",
 }
 
-DEPRECATED_OPTIONS = {
+OBSOLETE_OPTIONS = {
     "--replicate": "use '--dump-format=SQLITE' instead",
     "--no-unescape": "use '--no-escape' instead",
     "--binary": "use '--binary-fields' instead",
@@ -284,6 +290,7 @@ DEPRECATED_OPTIONS = {
     "--purge-output": "use '--purge' instead",
     "--check-payload": None,
     "--check-waf": None,
+    "--identify-waf": "functionality being done automatically",
     "--pickled-options": "use '--api -c ...' instead",
 }
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2018 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2019 sqlmap developers (http://sqlmap.org/)
 See the file 'LICENSE' for copying permission
 """
 
@@ -61,6 +61,7 @@ optDict = {
         "csrfToken": "string",
         "csrfUrl": "string",
         "forceSSL": "boolean",
+        "chunked": "boolean",
         "hpp": "boolean",
         "evalCode": "string",
     },
@@ -78,6 +79,7 @@ optDict = {
         "skip": "string",
         "skipStatic": "boolean",
         "paramExclude": "string",
+        "paramFilter": "string",
         "dbms": "string",
         "dbmsCred": "string",
         "os": "string",
@@ -137,6 +139,7 @@ optDict = {
         "dumpAll": "boolean",
         "search": "boolean",
         "getComments": "boolean",
+        "getStatements": "boolean",
         "db": "string",
         "tbl": "string",
         "col": "string",
@@ -149,7 +152,7 @@ optDict = {
         "limitStop": "integer",
         "firstChar": "integer",
         "lastChar": "integer",
-        "query": "string",
+        "sqlQuery": "string",
         "sqlShell": "boolean",
         "sqlFile": "string",
     },
@@ -165,9 +168,9 @@ optDict = {
     },
 
     "File system": {
-        "rFile": "string",
-        "wFile": "string",
-        "dFile": "string",
+        "fileRead": "string",
+        "fileWrite": "string",
+        "fileDest": "string",
     },
 
     "Takeover": {
@@ -192,7 +195,6 @@ optDict = {
     },
 
     "General": {
-        # "xmlFile": "string",
         "trafficFile": "string",
         "batch": "boolean",
         "binaryFields": "string",
@@ -211,6 +213,8 @@ optDict = {
         "hexConvert": "boolean",
         "outputDir": "string",
         "parseErrors": "boolean",
+        "preprocess": "string",
+        "repair": "boolean",
         "saveConfig": "string",
         "scope": "string",
         "testFilter": "string",
@@ -226,7 +230,6 @@ optDict = {
         "dependencies": "boolean",
         "disableColoring": "boolean",
         "googlePage": "integer",
-        "identifyWaf": "boolean",
         "listTampers": "boolean",
         "mobile": "boolean",
         "offline": "boolean",

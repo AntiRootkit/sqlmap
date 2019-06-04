@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2018 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2019 sqlmap developers (http://sqlmap.org/)
 See the file 'LICENSE' for copying permission
 """
+
+from __future__ import print_function
 
 import re
 import time
@@ -14,12 +16,11 @@ from lib.core.bigarray import BigArray
 from lib.core.common import Backend
 from lib.core.common import calculateDeltaSeconds
 from lib.core.common import dataToStdout
-from lib.core.common import decodeHexValue
+from lib.core.common import decodeDbmsHexValue
 from lib.core.common import extractRegexResult
 from lib.core.common import firstNotNone
 from lib.core.common import getConsoleWidth
 from lib.core.common import getPartRun
-from lib.core.common import getUnicode
 from lib.core.common import hashDBRetrieve
 from lib.core.common import hashDBWrite
 from lib.core.common import incrementCounter
@@ -30,8 +31,10 @@ from lib.core.common import listToStrValue
 from lib.core.common import readInput
 from lib.core.common import unArrayizeValue
 from lib.core.common import wasLastResponseHTTPError
-from lib.core.convert import hexdecode
-from lib.core.convert import htmlunescape
+from lib.core.compat import xrange
+from lib.core.convert import decodeHex
+from lib.core.convert import getUnicode
+from lib.core.convert import htmlUnescape
 from lib.core.data import conf
 from lib.core.data import kb
 from lib.core.data import logger
@@ -55,6 +58,7 @@ from lib.core.threads import runThreads
 from lib.core.unescaper import unescaper
 from lib.request.connect import Connect as Request
 from lib.utils.progress import ProgressBar
+from thirdparty import six
 
 def _oneShotErrorUse(expression, field=None, chunkTest=False):
     offset = 1
@@ -70,7 +74,7 @@ def _oneShotErrorUse(expression, field=None, chunkTest=False):
 
     threadData.resumed = retVal is not None and not partialValue
 
-    if any(Backend.isDbms(dbms) for dbms in (DBMS.MYSQL, DBMS.MSSQL)) and kb.errorChunkLength is None and not chunkTest and not kb.testMode:
+    if any(Backend.isDbms(dbms) for dbms in (DBMS.MYSQL, DBMS.MSSQL, DBMS.ORACLE)) and kb.errorChunkLength is None and not chunkTest and not kb.testMode:
         debugMsg = "searching for error chunk length..."
         logger.debug(debugMsg)
 
@@ -78,8 +82,11 @@ def _oneShotErrorUse(expression, field=None, chunkTest=False):
         while current >= MIN_ERROR_CHUNK_LENGTH:
             testChar = str(current % 10)
 
-            testQuery = "%s('%s',%d)" % ("REPEAT" if Backend.isDbms(DBMS.MYSQL) else "REPLICATE", testChar, current)
-            testQuery = "SELECT %s" % (agent.hexConvertField(testQuery) if conf.hexConvert else testQuery)
+            if Backend.isDbms(DBMS.ORACLE):
+                testQuery = "RPAD('%s',%d,'%s')" % (testChar, current, testChar)
+            else:
+                testQuery = "%s('%s',%d)" % ("REPEAT" if Backend.isDbms(DBMS.MYSQL) else "REPLICATE", testChar, current)
+                testQuery = "SELECT %s" % (agent.hexConvertField(testQuery) if conf.hexConvert else testQuery)
 
             result = unArrayizeValue(_oneShotErrorUse(testQuery, chunkTest=True))
 
@@ -92,7 +99,7 @@ def _oneShotErrorUse(expression, field=None, chunkTest=False):
                     candidate = len(result) - len(kb.chars.stop)
                     current = candidate if candidate != current else current - 1
             else:
-                current = current / 2
+                current = current // 2
 
         if kb.errorChunkLength:
             hashDBWrite(HASHDB_KEYS.KB_ERROR_CHUNK_LENGTH, kb.errorChunkLength)
@@ -108,7 +115,7 @@ def _oneShotErrorUse(expression, field=None, chunkTest=False):
                 if field:
                     nulledCastedField = agent.nullAndCastField(field)
 
-                    if any(Backend.isDbms(dbms) for dbms in (DBMS.MYSQL, DBMS.MSSQL)) and not any(_ in field for _ in ("COUNT", "CASE")) and kb.errorChunkLength and not chunkTest:
+                    if any(Backend.isDbms(dbms) for dbms in (DBMS.MYSQL, DBMS.MSSQL, DBMS.ORACLE)) and not any(_ in field for _ in ("COUNT", "CASE")) and kb.errorChunkLength and not chunkTest:
                         extendedField = re.search(r"[^ ,]*%s[^ ,]*" % re.escape(field), expression).group(0)
                         if extendedField != field:  # e.g. MIN(surname)
                             nulledCastedField = extendedField.replace(field, nulledCastedField)
@@ -168,7 +175,7 @@ def _oneShotErrorUse(expression, field=None, chunkTest=False):
                             else:
                                 output = output.rstrip()
 
-                if any(Backend.isDbms(dbms) for dbms in (DBMS.MYSQL, DBMS.MSSQL)):
+                if any(Backend.isDbms(dbms) for dbms in (DBMS.MYSQL, DBMS.MSSQL, DBMS.ORACLE)):
                     if offset == 1:
                         retVal = output
                     else:
@@ -197,10 +204,10 @@ def _oneShotErrorUse(expression, field=None, chunkTest=False):
                 hashDBWrite(expression, "%s%s" % (retVal, PARTIAL_VALUE_MARKER))
             raise
 
-        retVal = decodeHexValue(retVal) if conf.hexConvert else retVal
+        retVal = decodeDbmsHexValue(retVal) if conf.hexConvert else retVal
 
-        if isinstance(retVal, basestring):
-            retVal = htmlunescape(retVal).replace("<br>", "\n")
+        if isinstance(retVal, six.string_types):
+            retVal = htmlUnescape(retVal).replace("<br>", "\n")
 
         retVal = _errorReplaceChars(retVal)
 
@@ -242,9 +249,9 @@ def _errorFields(expression, expressionFields, expressionFieldsList, num=None, e
 
         if not suppressOutput:
             if kb.fileReadMode and output and output.strip():
-                print
+                print()
             elif output is not None and not (threadData.resumed and kb.suppressResumeInfo) and not (emptyFields and field in emptyFields):
-                status = "[%s] [INFO] %s: %s" % (time.strftime("%X"), "resumed" if threadData.resumed else "retrieved", output if kb.safeCharEncode else safecharencode(output))
+                status = "[%s] [INFO] %s: '%s'" % (time.strftime("%X"), "resumed" if threadData.resumed else "retrieved", output if kb.safeCharEncode else safecharencode(output))
 
                 if len(status) > width:
                     status = "%s..." % status[:width - 3]
@@ -275,9 +282,9 @@ def _formatPartialContent(value):
     Prepares (possibly hex-encoded) partial content for safe console output
     """
 
-    if value and isinstance(value, basestring):
+    if value and isinstance(value, six.string_types):
         try:
-            value = hexdecode(value)
+            value = decodeHex(value, binary=False)
         except:
             pass
         finally:
@@ -332,7 +339,7 @@ def errorUse(expression, dump=False):
                     stopLimit = int(count)
 
                     infoMsg = "used SQL query returns "
-                    infoMsg += "%d entries" % stopLimit
+                    infoMsg += "%d %s" % (stopLimit, "entries" if stopLimit > 1 else "entry")
                     logger.info(infoMsg)
 
             elif count and not count.isdigit():
@@ -403,7 +410,7 @@ def errorUse(expression, dump=False):
                             with kb.locks.limit:
                                 try:
                                     threadData.shared.counter += 1
-                                    num = threadData.shared.limits.next()
+                                    num = next(threadData.shared.limits)
                                 except StopIteration:
                                     break
 
@@ -444,8 +451,11 @@ def errorUse(expression, dump=False):
     if not value and not abortedFlag:
         value = _errorFields(expression, expressionFields, expressionFieldsList)
 
-    if value and isListLike(value) and len(value) == 1 and isinstance(value[0], basestring):
-        value = unArrayizeValue(value)
+    if value and isListLike(value):
+        if len(value) == 1 and isinstance(value[0], six.string_types):
+            value = unArrayizeValue(value)
+        elif len(value) > 1 and stopLimit == 1:
+            value = [value]
 
     duration = calculateDeltaSeconds(start)
 

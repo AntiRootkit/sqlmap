@@ -1,30 +1,30 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2018 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2019 sqlmap developers (http://sqlmap.org/)
 See the file 'LICENSE' for copying permission
 """
 
+import codecs
 import os
 import random
 import re
-import subprocess
 import string
 import sys
-import types
 
-from lib.core.datatype import AttribDict
 from lib.core.enums import DBMS
 from lib.core.enums import DBMS_DIRECTORY_NAME
 from lib.core.enums import OS
+from thirdparty.six import unichr as _unichr
 
 # sqlmap version (<major>.<minor>.<month>.<monthly commit>)
-VERSION = "1.2.7.28"
+VERSION = "1.3.6.11"
 TYPE = "dev" if VERSION.count('.') > 2 and VERSION.split('.')[-1] != '0' else "stable"
 TYPE_COLORS = {"dev": 33, "stable": 90, "pip": 34}
 VERSION_STRING = "sqlmap/%s#%s" % ('.'.join(VERSION.split('.')[:-1]) if VERSION.count('.') > 2 and VERSION.split('.')[-1] == '0' else VERSION, TYPE)
 DESCRIPTION = "automatic SQL injection and database takeover tool"
 SITE = "http://sqlmap.org"
+DEFAULT_USER_AGENT = "%s (%s)" % (VERSION_STRING, SITE)
 DEV_EMAIL_ADDRESS = "dev@sqlmap.org"
 ISSUES_PAGE = "https://github.com/sqlmapproject/sqlmap/issues/new"
 GIT_REPOSITORY = "https://github.com/sqlmapproject/sqlmap.git"
@@ -38,17 +38,17 @@ BANNER = """\033[01;33m\
  ___ ___[.]_____ ___ ___  \033[01;37m{\033[01;%dm%s\033[01;37m}\033[01;33m
 |_ -| . [.]     | .'| . |
 |___|_  [.]_|_|_|__,|  _|
-      |_|V          |_|   \033[0m\033[4;37m%s\033[0m\n
+      |_|V...       |_|   \033[0m\033[4;37m%s\033[0m\n
 """ % (TYPE_COLORS.get(TYPE, 31), VERSION_STRING.split('/')[-1], SITE)
 
 # Minimum distance of ratio from kb.matchRatio to result in True
 DIFF_TOLERANCE = 0.05
 CONSTANT_RATIO = 0.9
 
-# Ratio used in heuristic check for WAF/IPS/IDS protected targets
+# Ratio used in heuristic check for WAF/IPS protected targets
 IDS_WAF_CHECK_RATIO = 0.5
 
-# Timeout used in heuristic check for WAF/IPS/IDS protected targets
+# Timeout used in heuristic check for WAF/IPS protected targets
 IDS_WAF_CHECK_TIMEOUT = 10
 
 # Lower and upper values for match ratio in case of stable page
@@ -66,11 +66,13 @@ ASTERISK_MARKER = "__ASTERISK_MARK__"
 REPLACEMENT_MARKER = "__REPLACEMENT_MARK__"
 BOUNDED_INJECTION_MARKER = "__BOUNDED_INJECTION_MARK__"
 SAFE_VARIABLE_MARKER = "__SAFE__"
+SAFE_HEX_MARKER = "__SAFE_HEX__"
 
 RANDOM_INTEGER_MARKER = "[RANDINT]"
 RANDOM_STRING_MARKER = "[RANDSTR]"
 SLEEP_TIME_MARKER = "[SLEEPTIME]"
 INFERENCE_MARKER = "[INFERENCE]"
+SINGLE_QUOTE_MARKER = "[SINGLE_QUOTE]"
 
 PAYLOAD_DELIMITER = "__PAYLOAD_DELIMITER__"
 CHAR_INFERENCE_MARK = "%c"
@@ -97,6 +99,12 @@ MAX_CONSECUTIVE_CONNECTION_ERRORS = 15
 # Timeout before the pre-connection candidate is being disposed (because of high probability that the web server will reset it)
 PRECONNECT_CANDIDATE_TIMEOUT = 10
 
+# Servers known to cause issue with pre-connection mechanism (because of lack of multi-threaded support)
+PRECONNECT_INCOMPATIBLE_SERVERS = ("SimpleHTTP", "BaseHTTP")
+
+# Identify WAF/IPS inside limited number of responses (Note: for optimization purposes)
+IDENTYWAF_PARSE_LIMIT = 10
+
 # Maximum sleep time in "Murphy" (testing) mode
 MAX_MURPHY_SLEEP_TIME = 3
 
@@ -104,7 +112,7 @@ MAX_MURPHY_SLEEP_TIME = 3
 GOOGLE_REGEX = r"webcache\.googleusercontent\.com/search\?q=cache:[^:]+:([^+]+)\+&amp;cd=|url\?\w+=((?![^>]+webcache\.googleusercontent\.com)http[^>]+)&(sa=U|rct=j)"
 
 # Regular expression used for extracting results from DuckDuckGo search
-DUCKDUCKGO_REGEX = r'"u":"([^"]+)'
+DUCKDUCKGO_REGEX = r'<a class="result__url" href="(htt[^"]+)'
 
 # Regular expression used for extracting results from Bing search
 BING_REGEX = r'<h2><a href="([^"]+)" h='
@@ -161,6 +169,9 @@ MAX_TECHNIQUES_PER_VALUE = 2
 # In case of missing piece of partial union dump, buffered array must be flushed after certain size
 MAX_BUFFERED_PARTIAL_UNION_LENGTH = 1024
 
+# Maximum size of cache used in @cachedmethod decorator
+MAX_CACHE_ITEMS = 256
+
 # Suffix used for naming meta databases in DBMS(es) without explicit database name
 METADB_SUFFIX = "_masterdb"
 
@@ -170,11 +181,14 @@ PUSH_VALUE_EXCEPTION_RETRY_COUNT = 3
 # Minimum time response set needed for time-comparison based on standard deviation
 MIN_TIME_RESPONSES = 30
 
+# Maximum time response set used during time-comparison based on standard deviation
+MAX_TIME_RESPONSES = 200
+
 # Minimum comparison ratio set needed for searching valid union column number based on standard deviation
 MIN_UNION_RESPONSES = 5
 
 # After these number of blanks at the end inference should stop (just in case)
-INFERENCE_BLANK_BREAK = 10
+INFERENCE_BLANK_BREAK = 5
 
 # Use this replacement character for cases when inference is not able to retrieve the proper character value
 INFERENCE_UNKNOWN_CHAR = '?'
@@ -207,23 +221,27 @@ DUMMY_USER_PREFIX = "__dummy__"
 DEFAULT_PAGE_ENCODING = "iso-8859-1"
 
 try:
-    unicode(DEFAULT_PAGE_ENCODING, DEFAULT_PAGE_ENCODING)
+    codecs.lookup(DEFAULT_PAGE_ENCODING)
 except LookupError:
     DEFAULT_PAGE_ENCODING = "utf8"
+
+# Marker for program piped input
+STDIN_PIPE_DASH = '-'
 
 # URL used in dummy runs
 DUMMY_URL = "http://foo/bar?id=1"
 
-# System variables
-IS_WIN = subprocess.mswindows
-
 # The name of the operating system dependent module imported. The following names have currently been registered: 'posix', 'nt', 'mac', 'os2', 'ce', 'java', 'riscos'
 PLATFORM = os.name
 PYVERSION = sys.version.split()[0]
+IS_WIN = PLATFORM == "nt"
+
+# Check if running in terminal
+IS_TTY = os.isatty(sys.stdout.fileno())
 
 # DBMS system databases
 MSSQL_SYSTEM_DBS = ("Northwind", "master", "model", "msdb", "pubs", "tempdb")
-MYSQL_SYSTEM_DBS = ("information_schema", "mysql", "performance_schema")
+MYSQL_SYSTEM_DBS = ("information_schema", "mysql", "performance_schema", "sys")
 PGSQL_SYSTEM_DBS = ("information_schema", "pg_catalog", "pg_toast", "pgagent")
 ORACLE_SYSTEM_DBS = ('ANONYMOUS', 'APEX_030200', 'APEX_PUBLIC_USER', 'APPQOSSYS', 'BI', 'CTXSYS', 'DBSNMP', 'DIP', 'EXFSYS', 'FLOWS_%', 'FLOWS_FILES', 'HR', 'IX', 'LBACSYS', 'MDDATA', 'MDSYS', 'MGMT_VIEW', 'OC', 'OE', 'OLAPSYS', 'ORACLE_OCM', 'ORDDATA', 'ORDPLUGINS', 'ORDSYS', 'OUTLN', 'OWBSYS', 'PM', 'SCOTT', 'SH', 'SI_INFORMTN_SCHEMA', 'SPATIAL_CSW_ADMIN_USR', 'SPATIAL_WFS_ADMIN_USR', 'SYS', 'SYSMAN', 'SYSTEM', 'WKPROXY', 'WKSYS', 'WK_TEST', 'WMSYS', 'XDB', 'XS$NULL')
 SQLITE_SYSTEM_DBS = ("sqlite_master", "sqlite_temp_master")
@@ -233,6 +251,7 @@ MAXDB_SYSTEM_DBS = ("SYSINFO", "DOMAIN")
 SYBASE_SYSTEM_DBS = ("master", "model", "sybsystemdb", "sybsystemprocs")
 DB2_SYSTEM_DBS = ("NULLID", "SQLJ", "SYSCAT", "SYSFUN", "SYSIBM", "SYSIBMADM", "SYSIBMINTERNAL", "SYSIBMTS", "SYSPROC", "SYSPUBLIC", "SYSSTAT", "SYSTOOLS")
 HSQLDB_SYSTEM_DBS = ("INFORMATION_SCHEMA", "SYSTEM_LOB")
+H2_SYSTEM_DBS = ("INFORMATION_SCHEMA")
 INFORMIX_SYSTEM_DBS = ("sysmaster", "sysutils", "sysuser", "sysadmin")
 
 MSSQL_ALIASES = ("microsoft sql server", "mssqlserver", "mssql", "ms")
@@ -246,20 +265,21 @@ MAXDB_ALIASES = ("maxdb", "sap maxdb", "sap db")
 SYBASE_ALIASES = ("sybase", "sybase sql server")
 DB2_ALIASES = ("db2", "ibm db2", "ibmdb2")
 HSQLDB_ALIASES = ("hsql", "hsqldb", "hs", "hypersql")
+H2_ALIASES = ("h2",)
 INFORMIX_ALIASES = ("informix", "ibm informix", "ibminformix")
 
 DBMS_DIRECTORY_DICT = dict((getattr(DBMS, _), getattr(DBMS_DIRECTORY_NAME, _)) for _ in dir(DBMS) if not _.startswith("_"))
 
-SUPPORTED_DBMS = MSSQL_ALIASES + MYSQL_ALIASES + PGSQL_ALIASES + ORACLE_ALIASES + SQLITE_ALIASES + ACCESS_ALIASES + FIREBIRD_ALIASES + MAXDB_ALIASES + SYBASE_ALIASES + DB2_ALIASES + HSQLDB_ALIASES + INFORMIX_ALIASES
+SUPPORTED_DBMS = MSSQL_ALIASES + MYSQL_ALIASES + PGSQL_ALIASES + ORACLE_ALIASES + SQLITE_ALIASES + ACCESS_ALIASES + FIREBIRD_ALIASES + MAXDB_ALIASES + SYBASE_ALIASES + DB2_ALIASES + HSQLDB_ALIASES + H2_ALIASES + INFORMIX_ALIASES
 SUPPORTED_OS = ("linux", "windows")
 
-DBMS_ALIASES = ((DBMS.MSSQL, MSSQL_ALIASES), (DBMS.MYSQL, MYSQL_ALIASES), (DBMS.PGSQL, PGSQL_ALIASES), (DBMS.ORACLE, ORACLE_ALIASES), (DBMS.SQLITE, SQLITE_ALIASES), (DBMS.ACCESS, ACCESS_ALIASES), (DBMS.FIREBIRD, FIREBIRD_ALIASES), (DBMS.MAXDB, MAXDB_ALIASES), (DBMS.SYBASE, SYBASE_ALIASES), (DBMS.DB2, DB2_ALIASES), (DBMS.HSQLDB, HSQLDB_ALIASES))
+DBMS_ALIASES = ((DBMS.MSSQL, MSSQL_ALIASES), (DBMS.MYSQL, MYSQL_ALIASES), (DBMS.PGSQL, PGSQL_ALIASES), (DBMS.ORACLE, ORACLE_ALIASES), (DBMS.SQLITE, SQLITE_ALIASES), (DBMS.ACCESS, ACCESS_ALIASES), (DBMS.FIREBIRD, FIREBIRD_ALIASES), (DBMS.MAXDB, MAXDB_ALIASES), (DBMS.SYBASE, SYBASE_ALIASES), (DBMS.DB2, DB2_ALIASES), (DBMS.HSQLDB, HSQLDB_ALIASES), (DBMS.H2, H2_ALIASES), (DBMS.INFORMIX, INFORMIX_ALIASES))
 
 USER_AGENT_ALIASES = ("ua", "useragent", "user-agent")
 REFERER_ALIASES = ("ref", "referer", "referrer")
 HOST_ALIASES = ("host",)
 
-HSQLDB_DEFAULT_SCHEMA = "PUBLIC"
+H2_DEFAULT_SCHEMA = HSQLDB_DEFAULT_SCHEMA = "PUBLIC"
 
 # Names that can't be used to name files on Windows OS
 WINDOWS_RESERVED_NAMES = ("CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9")
@@ -317,17 +337,20 @@ CURRENT_DB = "CD"
 SESSION_SQLITE_FILE = "session.sqlite"
 
 # Regular expressions used for finding file paths in error messages
-FILE_PATH_REGEXES = (r"<b>(?P<result>[^<>]+?)</b> on line \d+", r"in (?P<result>[^<>'\"]+?)['\"]? on line \d+", r"(?:[>(\[\s])(?P<result>[A-Za-z]:[\\/][\w. \\/-]*)", r"(?:[>(\[\s])(?P<result>/\w[/\w.~-]+)", r"href=['\"]file://(?P<result>/[^'\"]+)")
+FILE_PATH_REGEXES = (r"<b>(?P<result>[^<>]+?)</b> on line \d+", r"\bin (?P<result>[^<>'\"]+?)['\"]? on line \d+", r"(?:[>(\[\s])(?P<result>[A-Za-z]:[\\/][\w. \\/-]*)", r"(?:[>(\[\s])(?P<result>/\w[/\w.~-]+)", r"\bhref=['\"]file://(?P<result>/[^'\"]+)", r"\bin <b>(?P<result>[^<]+): line \d+")
 
 # Regular expressions used for parsing error messages (--parse-errors)
 ERROR_PARSING_REGEXES = (
-    r"<b>[^<]*(fatal|error|warning|exception)[^<]*</b>:?\s*(?P<result>.+?)<br\s*/?\s*>",
+    r"\[Microsoft\]\[ODBC SQL Server Driver\]\[SQL Server\](?P<result>[^<]+)",
+    r"<b>[^<]*(fatal|error|warning|exception)[^<]*</b>:?\s*(?P<result>[^<]+)",
     r"(?m)^\s*(fatal|error|warning|exception):?\s*(?P<result>[^\n]+?)$",
+    r"(sql|dbc)[^>'\"]{0,32}(fatal|error|warning|exception)(</b>)?:\s*(?P<result>[^<>]+)",
     r"(?P<result>[^\n>]*SQL Syntax[^\n<]+)",
-    r"<li>Error Type:<br>(?P<result>.+?)</li>",
+    r"(?s)<li>Error Type:<br>(?P<result>.+?)</li>",
     r"CDbCommand (?P<result>[^<>\n]*SQL[^<>\n]+)",
     r"error '[0-9a-f]{8}'((<[^>]+>)|\s)+(?P<result>[^<>]+)",
-    r"\[[^\n\]]+(ODBC|JDBC)[^\n\]]+\](\[[^\]]+\])?(?P<result>[^\n]+(in query expression|\(SQL| at /[^ ]+pdo)[^\n<]+)"
+    r"\[[^\n\]]+(ODBC|JDBC)[^\n\]]+\](\[[^\]]+\])?(?P<result>[^\n]+(in query expression|\(SQL| at /[^ ]+pdo)[^\n<]+)",
+    r"(?P<result>query error: SELECT[^<>]+)"
 )
 
 # Regular expression used for parsing charset info from meta html headers
@@ -349,7 +372,7 @@ COMMON_PASSWORD_SUFFIXES += ("!", ".", "*", "!!", "?", ";", "..", "!!!", ", ", "
 WEBSCARAB_SPLITTER = "### Conversation"
 
 # Splitter used between requests in BURP log files
-BURP_REQUEST_REGEX = r"={10,}\s+[^=]+={10,}\s(.+?)\s={10,}"
+BURP_REQUEST_REGEX = r"={10,}\s+([A-Z]{3,} .+?)\s+={10,}"
 
 # Regex used for parsing XML Burp saved history items
 BURP_XML_HISTORY_REGEX = r'<port>(\d+)</port>.+?<request base64="true"><!\[CDATA\[([^]]+)'
@@ -364,10 +387,10 @@ URI_HTTP_HEADER = "URI"
 URI_INJECTABLE_REGEX = r"//[^/]*/([^\.*?]+)\Z"
 
 # Regex used for masking sensitive data
-SENSITIVE_DATA_REGEX = r"(\s|=)(?P<result>[^\s=]*%s[^\s]*)\s"
+SENSITIVE_DATA_REGEX = r"(\s|=)(?P<result>[^\s=]*\b%s\b[^\s]*)\s"
 
 # Options to explicitly mask in anonymous (unhandled exception) reports (along with anything carrying the <hostname> inside)
-SENSITIVE_OPTIONS = ("hostname", "answers", "data", "dnsDomain", "googleDork", "authCred", "proxyCred", "tbl", "db", "col", "user", "cookie", "proxy", "rFile", "wFile", "dFile", "testParameter", "authCred")
+SENSITIVE_OPTIONS = ("hostname", "answers", "data", "dnsDomain", "googleDork", "authCred", "proxyCred", "tbl", "db", "col", "user", "cookie", "proxy", "fileRead", "fileWrite", "fileDest", "testParameter", "authCred", "sqlQuery", "requestFile")
 
 # Maximum number of threads (avoiding connection issues and/or DoS)
 MAX_NUMBER_OF_THREADS = 10
@@ -406,7 +429,7 @@ REFLECTED_VALUE_MARKER = "__REFLECTED_VALUE__"
 REFLECTED_BORDER_REGEX = r"[^A-Za-z]+"
 
 # Regular expression used for replacing non-alphanum characters
-REFLECTED_REPLACEMENT_REGEX = r".+"
+REFLECTED_REPLACEMENT_REGEX = r"[^\n]{1,100}"
 
 # Maximum time (in seconds) spent per reflective value(s) replacement
 REFLECTED_REPLACEMENT_TIMEOUT = 3
@@ -426,8 +449,11 @@ DEFAULT_MSSQL_SCHEMA = "dbo"
 # Display hash attack info every mod number of items
 HASH_MOD_ITEM_DISPLAY = 11
 
+# Display marker for (cracked) empty password
+HASH_EMPTY_PASSWORD_MARKER = "<empty>"
+
 # Maximum integer value
-MAX_INT = sys.maxint
+MAX_INT = sys.maxsize
 
 # Replacement for unsafe characters in dump table filenames
 UNSAFE_DUMP_FILEPATH_REPLACEMENT = '_'
@@ -492,8 +518,6 @@ HTML_TITLE_REGEX = r"<title>(?P<result>[^<]+)</title>"
 # Table used for Base64 conversion in WordPress hash cracking routine
 ITOA64 = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
-PICKLE_REDUCE_WHITELIST = (types.BooleanType, types.DictType, types.FloatType, types.IntType, types.ListType, types.LongType, types.NoneType, types.StringType, types.TupleType, types.UnicodeType, types.XRangeType, type(AttribDict()), type(set()))
-
 # Chars used to quickly distinguish if the user provided tainted parameter values
 DUMMY_SQL_INJECTION_CHARS = ";()'"
 
@@ -512,11 +536,11 @@ BRUTE_TABLE_EXISTS_TEMPLATE = "EXISTS(SELECT %d FROM %s)"
 # Template used for common column existence check
 BRUTE_COLUMN_EXISTS_TEMPLATE = "EXISTS(SELECT %s FROM %s)"
 
-# Payload used for checking of existence of IDS/IPS/WAF (dummier the better)
-IDS_WAF_CHECK_PAYLOAD = "AND 1=1 UNION ALL SELECT 1,NULL,'<script>alert(\"XSS\")</script>',table_name FROM information_schema.tables WHERE 2>1--/**/; EXEC xp_cmdshell('cat ../../../etc/passwd')#"
-
 # Data inside shellcodeexec to be filled with random string
 SHELLCODEEXEC_RANDOM_STRING_MARKER = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+
+# Period after last-update to start nagging about the old revision
+LAST_UPDATE_NAGGING_DAYS = 60
 
 # Generic address for checking the Internet connection while using switch --check-internet
 CHECK_INTERNET_ADDRESS = "https://ipinfo.io/"
@@ -524,13 +548,16 @@ CHECK_INTERNET_ADDRESS = "https://ipinfo.io/"
 # Value to look for in response to CHECK_INTERNET_ADDRESS
 CHECK_INTERNET_VALUE = "IP Address Details"
 
-# Vectors used for provoking specific WAF/IPS/IDS behavior(s)
+# Payload used for checking of existence of WAF/IPS (dummier the better)
+IPS_WAF_CHECK_PAYLOAD = "AND 1=1 UNION ALL SELECT 1,NULL,'<script>alert(\"XSS\")</script>',table_name FROM information_schema.tables WHERE 2>1--/**/; EXEC xp_cmdshell('cat ../../../etc/passwd')#"
+
+# Vectors used for provoking specific WAF/IPS behavior(s)
 WAF_ATTACK_VECTORS = (
     "",  # NIL
     "search=<script>alert(1)</script>",
     "file=../../../../etc/passwd",
     "q=<invalid>foobar",
-    "id=1 %s" % IDS_WAF_CHECK_PAYLOAD
+    "id=1 %s" % IPS_WAF_CHECK_PAYLOAD
 )
 
 # Used for status representation in dictionary attack phase
@@ -571,7 +598,7 @@ UNION_CHAR_REGEX = r"\A\w+\Z"
 UNENCODED_ORIGINAL_VALUE = "original"
 
 # Common column names containing usernames (used for hash cracking in some cases)
-COMMON_USER_COLUMNS = ("login", "user", "username", "user_name", "user_login", "benutzername", "benutzer", "utilisateur", "usager", "consommateur", "utente", "utilizzatore", "usufrutuario", "korisnik", "usuario", "consumidor", "client", "cuser")
+COMMON_USER_COLUMNS = ("login", "user", "username", "user_name", "user_login", "benutzername", "benutzer", "utilisateur", "usager", "consommateur", "utente", "utilizzatore", "utilizator", "utilizador", "usufrutuario", "korisnik", "uporabnik", "usuario", "consumidor", "client", "cuser")
 
 # Default delimiter in GET/POST values
 DEFAULT_GET_POST_DELIMITER = '&'
@@ -583,7 +610,7 @@ DEFAULT_COOKIE_DELIMITER = ';'
 FORCE_COOKIE_EXPIRATION_TIME = "9999999999"
 
 # Github OAuth token used for creating an automatic Issue for unhandled exceptions
-GITHUB_REPORT_OAUTH_TOKEN = "NTMyNWNkMmZkMzRlMDZmY2JkMmY0MGI4NWI0MzVlM2Q5YmFjYWNhYQ=="
+GITHUB_REPORT_OAUTH_TOKEN = "NTYzYjhmZWJjYzc0Njg2ODJhNzhmNDg1YzM0YzlkYjk3N2JiMzE3Nw=="
 
 # Skip unforced HashDB flush requests below the threshold number of cached items
 HASHDB_FLUSH_THRESHOLD = 32
@@ -598,7 +625,10 @@ HASHDB_RETRIEVE_RETRIES = 3
 HASHDB_END_TRANSACTION_RETRIES = 3
 
 # Unique milestone value used for forced deprecation of old HashDB values (e.g. when changing hash/pickle mechanism)
-HASHDB_MILESTONE_VALUE = "BZzRotigLX"  # python -c 'import random, string; print "".join(random.sample(string.ascii_letters, 10))'
+HASHDB_MILESTONE_VALUE = "OdqjeUpBLc"  # python -c 'import random, string; print "".join(random.sample(string.ascii_letters, 10))'
+
+# Pickle protocl used for storage of serialized data inside HashDB (https://docs.python.org/3/library/pickle.html#data-stream-format)
+PICKLE_PROTOCOL = 2
 
 # Warn user of possible delay due to large page dump in full UNION query injections
 LARGE_OUTPUT_THRESHOLD = 1024 ** 2
@@ -608,6 +638,9 @@ SLOW_ORDER_COUNT_THRESHOLD = 10000
 
 # Give up on hash recognition if nothing was found in first given number of rows
 HASH_RECOGNITION_QUIT_THRESHOLD = 10000
+
+# Regular expression used for automatic hex conversion and hash cracking of (RAW) binary column values
+HASH_BINARY_COLUMNS_REGEX = r"(?i)pass|psw|hash"
 
 # Maximum number of redirections to any single URL - this is needed because of the state that cookies introduce
 MAX_SINGLE_URL_REDIRECTIONS = 4
@@ -661,7 +694,10 @@ VALID_TIME_CHARS_RUN_THRESHOLD = 100
 CHECK_ZERO_COLUMNS_THRESHOLD = 10
 
 # Boldify all logger messages containing these "patterns"
-BOLD_PATTERNS = ("' injectable", "provided empty", "leftover chars", "might be injectable", "' is vulnerable", "is not injectable", "does not seem to be", "test failed", "test passed", "live test final result", "test shows that", "the back-end DBMS is", "created Github", "blocked by the target server", "protection is involved", "CAPTCHA", "specific response", "NULL connection is supported")
+BOLD_PATTERNS = ("' injectable", "provided empty", "leftover chars", "might be injectable", "' is vulnerable", "is not injectable", "does not seem to be", "test failed", "test passed", "live test final result", "test shows that", "the back-end DBMS is", "created Github", "blocked by the target server", "protection is involved", "CAPTCHA", "specific response", "NULL connection is supported", "PASSED", "FAILED", "for more than")
+
+# TLDs used in randomization of email-alike parameter values
+RANDOMIZATION_TLDS = ("com", "net", "ru", "org", "de", "jp", "cn", "fr", "it", "pl", "tv", "edu", "in", "ir", "es", "me", "info", "gr", "gov", "ca", "co", "se", "cz", "to", "vn", "nl", "cc", "az", "hu", "ua", "be", "no", "biz", "io", "ch", "ro", "sk", "eu", "us", "tw", "pt", "fi", "at", "lt", "kz", "cl", "hr", "pk", "lv", "la", "pe")
 
 # Generic www root directory names
 GENERIC_DOC_ROOT_DIRECTORY_NAMES = ("htdocs", "httpdocs", "public", "wwwroot", "www")
@@ -673,7 +709,7 @@ MAX_HELP_OPTION_LENGTH = 18
 MAX_CONNECT_RETRIES = 100
 
 # Strings for detecting formatting errors
-FORMAT_EXCEPTION_STRINGS = ("Type mismatch", "Error converting", "Conversion failed", "String or binary data would be truncated", "Failed to convert", "unable to interpret text value", "Input string was not in a correct format", "System.FormatException", "java.lang.NumberFormatException", "ValueError: invalid literal", "DataTypeMismatchException", "CF_SQL_INTEGER", " for CFSQLTYPE ", "cfqueryparam cfsqltype", "InvalidParamTypeException", "Invalid parameter type", "is not of type numeric", "<cfif Not IsNumeric(", "invalid input syntax for integer", "invalid input syntax for type", "invalid number", "character to number conversion error", "unable to interpret text value", "String was not recognized as a valid", "Convert.ToInt", "cannot be converted to a ", "InvalidDataException")
+FORMAT_EXCEPTION_STRINGS = ("Type mismatch", "Error converting", "Please enter a", "Conversion failed", "String or binary data would be truncated", "Failed to convert", "unable to interpret text value", "Input string was not in a correct format", "System.FormatException", "java.lang.NumberFormatException", "ValueError: invalid literal", "TypeMismatchException", "CF_SQL_INTEGER", "CF_SQL_NUMERIC", " for CFSQLTYPE ", "cfqueryparam cfsqltype", "InvalidParamTypeException", "Invalid parameter type", "Attribute validation error for tag", "is not of type numeric", "<cfif Not IsNumeric(", "invalid input syntax for integer", "invalid input syntax for type", "invalid number", "character to number conversion error", "unable to interpret text value", "String was not recognized as a valid", "Convert.ToInt", "cannot be converted to a ", "InvalidDataException")
 
 # Regular expression used for extracting ASP.NET view state values
 VIEWSTATE_REGEX = r'(?i)(?P<name>__VIEWSTATE[^"]*)[^>]+value="(?P<result>[^"]+)'
@@ -692,6 +728,9 @@ RESTAPI_DEFAULT_ADDRESS = "127.0.0.1"
 
 # Default REST-JSON API server listen port
 RESTAPI_DEFAULT_PORT = 8775
+
+# Use "Supplementary Private Use Area-A"
+INVALID_UNICODE_PRIVATE_AREA = False
 
 # Format used for representing invalid unicode characters
 INVALID_UNICODE_CHAR_FORMAT = r"\x%02x"
@@ -741,20 +780,26 @@ METASPLOIT_SESSION_TIMEOUT = 120
 # Reference: http://www.postgresql.org/docs/9.0/static/catalog-pg-largeobject.html
 LOBLKSIZE = 2048
 
-# Suffix used to mark variables having keyword names
-EVALCODE_KEYWORD_SUFFIX = "_KEYWORD"
+# Prefix used to mark special variables (e.g. keywords, having special chars, etc.)
+EVALCODE_ENCODED_PREFIX = "EVAL_"
+
+# Reference: https://en.wikipedia.org/wiki/Zip_(file_format)
+ZIP_HEADER = b"\x50\x4b\x03\x04"
 
 # Reference: http://www.cookiecentral.com/faq/#3.5
 NETSCAPE_FORMAT_HEADER_COOKIES = "# Netscape HTTP Cookie File."
 
 # Infixes used for automatic recognition of parameters carrying anti-CSRF tokens
-CSRF_TOKEN_PARAMETER_INFIXES = ("csrf", "xsrf")
+CSRF_TOKEN_PARAMETER_INFIXES = ("csrf", "xsrf", "token")
 
 # Prefixes used in brute force search for web server document root
 BRUTE_DOC_ROOT_PREFIXES = {
     OS.LINUX: ("/var/www", "/usr/local/apache", "/usr/local/apache2", "/usr/local/www/apache22", "/usr/local/www/apache24", "/usr/local/httpd", "/var/www/nginx-default", "/srv/www", "/var/www/%TARGET%", "/var/www/vhosts/%TARGET%", "/var/www/virtual/%TARGET%", "/var/www/clients/vhosts/%TARGET%", "/var/www/clients/virtual/%TARGET%"),
     OS.WINDOWS: ("/xampp", "/Program Files/xampp", "/wamp", "/Program Files/wampp", "/apache", "/Program Files/Apache Group/Apache", "/Program Files/Apache Group/Apache2", "/Program Files/Apache Group/Apache2.2", "/Program Files/Apache Group/Apache2.4", "/Inetpub/wwwroot", "/Inetpub/wwwroot/%TARGET%", "/Inetpub/vhosts/%TARGET%")
 }
+
+# Table prefix to use in "takeover" functionalities (i.e. auxiliary tables used by sqlmap at the vulnerable DBMS)
+TAKEOVER_TABLE_PREFIX = "sqlmap"
 
 # Suffixes used in brute force search for web server document root
 BRUTE_DOC_ROOT_SUFFIXES = ("", "html", "htdocs", "httpdocs", "php", "public", "src", "site", "build", "web", "www", "data", "sites/all", "www/build")
@@ -767,6 +812,9 @@ KB_CHARS_BOUNDARY_CHAR = 'q'
 
 # Letters of lower frequency used in kb.chars
 KB_CHARS_LOW_FREQUENCY_ALPHABET = "zqxjkvbp"
+
+# SQL keywords used for splitting in HTTP chunked transfer encoded requests (switch --chunk)
+HTTP_CHUNKED_SPLIT_KEYWORDS = ("SELECT", "UPDATE", "INSERT", "FROM", "LOAD_FILE", "UNION", "information_schema", "sysdatabases", "msysaccessobjects", "msysqueries", "sysmodules")
 
 # CSS style used in HTML dump format
 HTML_DUMP_CSS_STYLE = """<style>
@@ -786,9 +834,26 @@ tr:nth-child(even) {
     background-color: #D3DFEE
 }
 td{
-    font-size:10px;
+    font-size:12px;
 }
 th{
-    font-size:10px;
+    font-size:12px;
 }
 </style>"""
+
+# Leaving (dirty) possibility to change values from here (e.g. `export SQLMAP__MAX_NUMBER_OF_THREADS=20`)
+for key, value in os.environ.items():
+    if key.upper().startswith("%s_" % SQLMAP_ENVIRONMENT_PREFIX):
+        _ = key[len(SQLMAP_ENVIRONMENT_PREFIX) + 1:].upper()
+        if _ in globals():
+            globals()[_] = value
+
+# Installing "reversible" unicode (decoding) error handler
+def _reversible(ex):
+    if isinstance(ex, UnicodeDecodeError):
+        if INVALID_UNICODE_PRIVATE_AREA:
+            return (u"".join(_unichr(int('000f00%2x' % (_ if isinstance(_, int) else ord(_)), 16)) for _ in ex.object[ex.start:ex.end]), ex.end)
+        else:
+            return (u"".join(INVALID_UNICODE_CHAR_FORMAT % (_ if isinstance(_, int) else ord(_)) for _ in ex.object[ex.start:ex.end]), ex.end)
+
+codecs.register_error("reversible", _reversible)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2018 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2019 sqlmap developers (http://sqlmap.org/)
 See the file 'LICENSE' for copying permission
 """
 
@@ -13,7 +13,7 @@ from lib.core.agent import agent
 from lib.core.common import Backend
 from lib.core.common import calculateDeltaSeconds
 from lib.core.common import dataToStdout
-from lib.core.common import decodeHexValue
+from lib.core.common import decodeDbmsHexValue
 from lib.core.common import extractRegexResult
 from lib.core.common import getSQLSnippet
 from lib.core.common import hashDBRetrieve
@@ -22,6 +22,7 @@ from lib.core.common import randomInt
 from lib.core.common import randomStr
 from lib.core.common import safeStringFormat
 from lib.core.common import singleTimeWarnMessage
+from lib.core.compat import xrange
 from lib.core.data import conf
 from lib.core.data import kb
 from lib.core.data import logger
@@ -57,7 +58,7 @@ def dnsUse(payload, expression):
             while True:
                 count += 1
                 prefix, suffix = ("%s" % randomStr(length=3, alphabet=DNS_BOUNDARIES_ALPHABET) for _ in xrange(2))
-                chunk_length = MAX_DNS_LABEL / 2 if Backend.getIdentifiedDbms() in (DBMS.ORACLE, DBMS.MYSQL, DBMS.PGSQL) else MAX_DNS_LABEL / 4 - 2
+                chunk_length = MAX_DNS_LABEL // 2 if Backend.getIdentifiedDbms() in (DBMS.ORACLE, DBMS.MYSQL, DBMS.PGSQL) else MAX_DNS_LABEL // 4 - 2
                 _, _, _, _, _, _, fieldToCastStr, _ = agent.getFields(expression)
                 nulledCastedField = agent.nullAndCastField(fieldToCastStr)
                 extendedField = re.search(r"[^ ,]*%s[^ ,]*" % re.escape(fieldToCastStr), expression).group(0)
@@ -84,7 +85,7 @@ def dnsUse(payload, expression):
 
                 if _:
                     _ = extractRegexResult(r"%s\.(?P<result>.+)\.%s" % (prefix, suffix), _, re.I)
-                    _ = decodeHexValue(_)
+                    _ = decodeDbmsHexValue(_)
                     output = (output or "") + _
                     offset += len(_)
 
@@ -93,7 +94,7 @@ def dnsUse(payload, expression):
                 else:
                     break
 
-            output = decodeHexValue(output) if conf.hexConvert else output
+            output = decodeDbmsHexValue(output) if conf.hexConvert else output
 
             kb.dnsMode = False
 

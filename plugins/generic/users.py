@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2018 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2019 sqlmap developers (http://sqlmap.org/)
 See the file 'LICENSE' for copying permission
 """
 
@@ -12,17 +12,17 @@ from lib.core.common import arrayizeValue
 from lib.core.common import Backend
 from lib.core.common import filterPairValues
 from lib.core.common import getLimitRange
-from lib.core.common import getUnicode
 from lib.core.common import isAdminFromPrivileges
 from lib.core.common import isInferenceAvailable
 from lib.core.common import isNoneValue
 from lib.core.common import isNumPosStrValue
 from lib.core.common import isTechniqueAvailable
 from lib.core.common import parsePasswordHash
-from lib.core.common import randomStr
 from lib.core.common import readInput
 from lib.core.common import unArrayizeValue
-from lib.core.convert import hexencode
+from lib.core.compat import xrange
+from lib.core.convert import encodeHex
+from lib.core.convert import getUnicode
 from lib.core.data import conf
 from lib.core.data import kb
 from lib.core.data import logger
@@ -43,8 +43,9 @@ from lib.request import inject
 from lib.utils.hash import attackCachedUsersPasswords
 from lib.utils.hash import storeHashesToFile
 from lib.utils.pivotdumptable import pivotDumpTable
+from thirdparty.six.moves import zip as _zip
 
-class Users:
+class Users(object):
     """
     This class defines users' enumeration functionalities for plugins.
     """
@@ -172,7 +173,7 @@ class Users:
         else:
             users = []
 
-        users = filter(None, users)
+        users = [_ for _ in users if _]
 
         if any(isTechniqueAvailable(_) for _ in (PAYLOAD.TECHNIQUE.UNION, PAYLOAD.TECHNIQUE.ERROR, PAYLOAD.TECHNIQUE.QUERY)) or conf.direct:
             if Backend.isDbms(DBMS.MSSQL) and Backend.isVersionWithin(("2005", "2008")):
@@ -187,13 +188,12 @@ class Users:
                 query += " OR ".join("%s = '%s'" % (condition, user) for user in sorted(users))
 
             if Backend.isDbms(DBMS.SYBASE):
-                randStr = randomStr()
                 getCurrentThreadData().disableStdOut = True
 
-                retVal = pivotDumpTable("(%s) AS %s" % (query, randStr), ['%s.name' % randStr, '%s.password' % randStr], blind=False)
+                retVal = pivotDumpTable("(%s) AS %s" % (query, kb.aliasName), ['%s.name' % kb.aliasName, '%s.password' % kb.aliasName], blind=False)
 
                 if retVal:
-                    for user, password in filterPairValues(zip(retVal[0]["%s.name" % randStr], retVal[0]["%s.password" % randStr])):
+                    for user, password in filterPairValues(_zip(retVal[0]["%s.name" % kb.aliasName], retVal[0]["%s.password" % kb.aliasName])):
                         if user not in kb.data.cachedUsersPasswords:
                             kb.data.cachedUsersPasswords[user] = [password]
                         else:
@@ -202,6 +202,9 @@ class Users:
                 getCurrentThreadData().disableStdOut = False
             else:
                 values = inject.getValue(query, blind=False, time=False)
+
+                if isNoneValue(values) and Backend.isDbms(DBMS.MSSQL):
+                    values = inject.getValue(query.replace("master.dbo.fn_varbintohexstr", "sys.fn_sqlvarbasetostr"), blind=False, time=False)
 
                 for user, password in filterPairValues(values):
                     if not user or user == " ":
@@ -215,6 +218,8 @@ class Users:
                         kb.data.cachedUsersPasswords[user].append(password)
 
         if not kb.data.cachedUsersPasswords and isInferenceAvailable() and not conf.direct:
+            fallback = False
+
             if not len(users):
                 users = self.getUsers()
 
@@ -228,14 +233,13 @@ class Users:
             if Backend.isDbms(DBMS.SYBASE):
                 getCurrentThreadData().disableStdOut = True
 
-                randStr = randomStr()
                 query = rootQuery.inband.query
 
-                retVal = pivotDumpTable("(%s) AS %s" % (query, randStr), ['%s.name' % randStr, '%s.password' % randStr], blind=True)
+                retVal = pivotDumpTable("(%s) AS %s" % (query, kb.aliasName), ['%s.name' % kb.aliasName, '%s.password' % kb.aliasName], blind=True)
 
                 if retVal:
-                    for user, password in filterPairValues(zip(retVal[0]["%s.name" % randStr], retVal[0]["%s.password" % randStr])):
-                        password = "0x%s" % hexencode(password, conf.encoding).upper()
+                    for user, password in filterPairValues(_zip(retVal[0]["%s.name" % kb.aliasName], retVal[0]["%s.password" % kb.aliasName])):
+                        password = "0x%s" % encodeHex(password, binary=False).upper()
 
                         if user not in kb.data.cachedUsersPasswords:
                             kb.data.cachedUsersPasswords[user] = [password]
@@ -266,6 +270,10 @@ class Users:
 
                         count = inject.getValue(query, union=False, error=False, expected=EXPECTED.INT, charsetType=CHARSET_TYPE.DIGITS)
 
+                        if not isNumPosStrValue(count) and Backend.isDbms(DBMS.MSSQL):
+                            fallback = True
+                            count = inject.getValue(query.replace("master.dbo.fn_varbintohexstr", "sys.fn_sqlvarbasetostr"), union=False, error=False, expected=EXPECTED.INT, charsetType=CHARSET_TYPE.DIGITS)
+
                         if not isNumPosStrValue(count):
                             warnMsg = "unable to retrieve the number of password "
                             warnMsg += "hashes for user '%s'" % user
@@ -286,8 +294,16 @@ class Users:
                                 query = rootQuery.blind.query2 % (user, index, user)
                             else:
                                 query = rootQuery.blind.query % (user, index, user)
+
+                            if fallback:
+                                query = query.replace("master.dbo.fn_varbintohexstr", "sys.fn_sqlvarbasetostr")
+
                         elif Backend.isDbms(DBMS.INFORMIX):
                             query = rootQuery.blind.query % (user,)
+
+                        elif Backend.isDbms(DBMS.HSQLDB):
+                            query = rootQuery.blind.query % (index, user)
+
                         else:
                             query = rootQuery.blind.query % (user, index)
 
@@ -356,7 +372,7 @@ class Users:
         else:
             users = []
 
-        users = filter(None, users)
+        users = [_ for _ in users if _]
 
         # Set containing the list of DBMS administrators
         areAdmins = set()
